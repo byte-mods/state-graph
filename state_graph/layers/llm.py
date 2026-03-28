@@ -570,6 +570,10 @@ class LLMModel(nn.Module):
     def forward(self, input_ids: torch.Tensor,
                 labels: Optional[torch.Tensor] = None) -> dict:
         B, L = input_ids.shape
+        # Clamp indices to valid range to prevent embedding OOB errors
+        input_ids = input_ids.clamp(0, self.vocab_size - 1)
+        if labels is not None:
+            labels = labels.clamp(0, self.vocab_size - 1)
         x = self.tok_emb(input_ids)
         x = self.drop(x)
 
@@ -1298,6 +1302,10 @@ class ComposableLLM(nn.Module):
     def forward(self, input_ids: torch.Tensor,
                 labels: Optional[torch.Tensor] = None) -> dict:
         B, L = input_ids.shape
+        # Clamp indices to valid range to prevent embedding OOB errors
+        input_ids = input_ids.clamp(0, self.vocab_size - 1)
+        if labels is not None:
+            labels = labels.clamp(0, self.vocab_size - 1)
         x = self.tok_emb(input_ids)
         x = self.pos_enc(x)
         x = self.drop(x)
@@ -1495,12 +1503,14 @@ class EncoderDecoderLLM(nn.Module):
                 nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     def encode(self, src_ids: torch.Tensor) -> torch.Tensor:
+        src_ids = src_ids.clamp(0, self.vocab_size - 1)
         x = self.pos_enc(self.drop(self.encoder_emb(src_ids)))
         for layer in self.encoder_layers:
             x = layer(x)
         return self.encoder_norm(x)
 
     def decode(self, tgt_ids: torch.Tensor, encoder_out: torch.Tensor) -> torch.Tensor:
+        tgt_ids = tgt_ids.clamp(0, self.vocab_size - 1)
         x = self.pos_enc(self.drop(self.decoder_emb(tgt_ids)))
         for layer in self.decoder_layers:
             x = layer(x, encoder_out)

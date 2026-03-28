@@ -662,6 +662,18 @@ class HFModelManager:
                     if self._stop_training:
                         break
 
+                    try:
+                        # Access batch data (may trigger lazy decoding)
+                        _ = batch
+                    except ImportError as e:
+                        msg = str(e)
+                        if "torchcodec" in msg:
+                            msg = "Audio decoding requires 'torchcodec'. Install with: pip install torchcodec"
+                        if broadcast_fn:
+                            broadcast_fn({"type": "hf_train_error", "error": msg})
+                        self._stop_training = True
+                        break
+
                     # Move batch to device
                     if isinstance(batch, dict):
                         batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v
@@ -678,6 +690,8 @@ class HFModelManager:
                             else:
                                 outputs = model(*batch)
                             loss = outputs.loss if hasattr(outputs, 'loss') else outputs[0]
+                            if loss.dim() > 0:
+                                loss = loss.mean()
                         scaler.scale(loss).backward()
                         scaler.unscale_(optimizer)
                         torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
@@ -689,6 +703,8 @@ class HFModelManager:
                         else:
                             outputs = model(*batch)
                         loss = outputs.loss if hasattr(outputs, 'loss') else outputs[0]
+                        if loss.dim() > 0:
+                            loss = loss.mean()
                         loss.backward()
                         torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
                         optimizer.step()

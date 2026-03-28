@@ -163,6 +163,12 @@ class HFDataManager:
 
         columns = sample_ds.column_names
 
+        # Validate column names before processing
+        if tokenizer and text_column not in columns and text_column != "text":
+            return {"status": "error", "message": f"Text column '{text_column}' not found. Available: {columns}"}
+        if label_column not in columns and label_column not in ("label", "labels"):
+            pass  # Label is optional — unsupervised fine-tuning is valid
+
         # Text preprocessing
         if tokenizer and text_column in columns:
             def tokenize_fn(examples):
@@ -283,7 +289,10 @@ class HFDataManager:
         for i in range(min(n, len(ds))):
             row = {}
             for col in ds.column_names:
-                val = ds[i][col]
+                try:
+                    val = ds[i][col]
+                except (KeyError, Exception):
+                    val = None
                 if isinstance(val, torch.Tensor):
                     val = f"Tensor{list(val.shape)}"
                 elif hasattr(val, "size"):
@@ -319,3 +328,66 @@ class HFDataManager:
         if self.dataset is None:
             return {"loaded": False}
         return {**self._info, "loaded": True}
+
+    def suggest_columns(self) -> dict:
+        """Auto-detect likely text, label, image, and audio columns."""
+        if self.dataset is None:
+            return {"text": None, "label": None, "image": None, "audio": None, "columns": []}
+
+        ds = self.dataset
+        if hasattr(ds, "keys"):
+            split_name = "train" if "train" in ds else list(ds.keys())[0]
+            sample_ds = ds[split_name]
+        else:
+            sample_ds = ds
+
+        columns = sample_ds.column_names
+        features = sample_ds.features if hasattr(sample_ds, "features") else {}
+
+        text_patterns = [
+            "text", "sentence", "sentence1", "question", "premise",
+            "content", "input", "instruction", "prompt", "query",
+            "review", "comment", "title", "body", "description",
+            "document", "passage", "context", "source",
+        ]
+        label_patterns = [
+            "label", "labels", "target", "class", "category",
+            "sentiment", "score", "rating", "output", "answer",
+            "label_text", "intent", "emotion",
+        ]
+        image_patterns = ["image", "img", "photo", "picture", "pixel_values"]
+        audio_patterns = ["audio", "speech", "sound", "waveform"]
+
+        def _find(patterns):
+            # Exact match first
+            for p in patterns:
+                if p in columns:
+                    return p
+            # Case-insensitive
+            lower_cols = {c.lower(): c for c in columns}
+            for p in patterns:
+                if p in lower_cols:
+                    return lower_cols[p]
+            return None
+
+        # Also check feature types for image/audio
+        text_col = _find(text_patterns)
+        label_col = _find(label_patterns)
+        image_col = _find(image_patterns)
+        audio_col = _find(audio_patterns)
+
+        # If no text column found by name, look for string-type columns
+        if text_col is None and features:
+            for col in columns:
+                feat = features.get(col)
+                if feat is not None and hasattr(feat, "dtype") and str(feat.dtype) == "string":
+                    text_col = col
+                    break
+
+        return {
+            "text": text_col,
+            "label": label_col,
+            "image": image_col,
+            "audio": audio_col,
+            "columns": columns,
+        }

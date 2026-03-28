@@ -1894,6 +1894,16 @@ async def start_llm_training(body: dict[str, Any]):
         except Exception as e:
             return {"status": "error", "message": f"Failed to load tokenizer: {e}"}
 
+    # Determine actual vocab size from tokenizer and resize model if needed
+    tok_info = getattr(engine, '_llm_tokenizer', {})
+    data_vocab = tok_info.get("vocab_size") or (max(encoded) + 1)
+    model_vocab = getattr(engine.model, 'vocab_size', None)
+    if model_vocab is not None and data_vocab > model_vocab:
+        _resize_llm_embeddings(engine.model, data_vocab)
+        engine.model.vocab_size = data_vocab
+        if engine._llm_config:
+            engine._llm_config["vocab_size"] = data_vocab
+
     # Create sequences
     data = torch.tensor(encoded, dtype=torch.long)
     if len(data) - 1 < max_len:
@@ -1950,6 +1960,13 @@ async def start_llm_training(body: dict[str, Any]):
     def train():
         try:
             _llm_train_loop()
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            engine._emit_from_thread("training_error", {
+                "error": str(e),
+                "traceback": tb,
+            })
         finally:
             engine._is_training = False
 
@@ -1963,6 +1980,33 @@ async def start_llm_training(body: dict[str, Any]):
         "n_val": n_val,
         "seq_len": max_len,
     }
+
+
+def _resize_llm_embeddings(model, new_vocab_size: int):
+    """Resize embedding and lm_head layers to match a new vocab size."""
+    import torch.nn as nn
+    old_emb = model.tok_emb
+    if isinstance(old_emb, nn.Embedding):
+        old_vocab, d_model = old_emb.weight.shape
+        if new_vocab_size != old_vocab:
+            new_emb = nn.Embedding(new_vocab_size, d_model)
+            # Copy existing weights
+            copy_size = min(old_vocab, new_vocab_size)
+            new_emb.weight.data[:copy_size] = old_emb.weight.data[:copy_size]
+            model.tok_emb = new_emb
+            # Resize lm_head
+            if hasattr(model, 'lm_head'):
+                old_head = model.lm_head
+                new_head = nn.Linear(d_model, new_vocab_size, bias=old_head.bias is not None)
+                copy_size_head = min(old_head.out_features, new_vocab_size)
+                new_head.weight.data[:copy_size_head] = old_head.weight.data[:copy_size_head]
+                if old_head.bias is not None:
+                    new_head.bias.data[:copy_size_head] = old_head.bias.data[:copy_size_head]
+                model.lm_head = new_head
+                # Re-tie weights if they were tied
+                if getattr(model, 'tie_weights', False) or (hasattr(model, '_tie_weights') and model._tie_weights):
+                    model.lm_head.weight = model.tok_emb.weight
+            model.to(next(model.parameters()).device)
 
 
 def _llm_train_loop():
@@ -2244,6 +2288,13 @@ async def hf_dataset_info():
     return dm.get_info()
 
 
+@app.get("/api/hf/datasets/columns")
+async def hf_dataset_columns():
+    """Get column names and auto-detected column mapping suggestions."""
+    dm = _get_hf_data()
+    return dm.suggest_columns()
+
+
 @app.post("/api/hf/config")
 async def hf_update_config(body: dict[str, Any]):
     engine.hf_config.update(body)
@@ -2336,6 +2387,26 @@ async def hf_start_training(body: dict[str, Any]):
 
     if mgr.model is None:
         return {"status": "error", "message": "No model loaded. Use /api/hf/load first."}
+
+    if dm.dataset is None:
+        return {"status": "error", "message": "No dataset loaded. Load a dataset first."}
+
+    # Auto-preprocess if not yet done (check if format is set)
+    ds = dm.dataset
+    sample_ds = ds[list(ds.keys())[0]] if hasattr(ds, "keys") else ds
+    if "input_ids" not in (sample_ds.column_names or []):
+        tokenizer = mgr.get_tokenizer()
+        if tokenizer:
+            suggestions = dm.suggest_columns()
+            text_col = body.get("text_column") or suggestions.get("text") or "text"
+            label_col = body.get("label_column") or suggestions.get("label") or "label"
+            dm.set_preprocessing(
+                tokenizer=tokenizer,
+                processor=mgr.get_processor(),
+                max_length=body.get("max_length", 128),
+                text_column=text_col,
+                label_column=label_col,
+            )
 
     loaders = dm.get_dataloaders(
         batch_size=body.get("batch_size", engine.config.get("batch_size", 16)),

@@ -1408,26 +1408,26 @@ label {
               <label>Library</label>
               <select id="hf-library">
                 <option value="">All</option>
-                <option value="transformers">Transformers</option>
-                <option value="timm">Timm</option>
                 <option value="diffusers">Diffusers</option>
+                <option value="timm">Timm</option>
+                <option value="transformers">Transformers</option>
               </select>
             </div>
             <div class="form-row">
               <label>Task</label>
               <select id="hf-task">
                 <option value="">All</option>
-                <option value="text-classification">Text Classification</option>
-                <option value="token-classification">Token Classification</option>
-                <option value="question-answering">Question Answering</option>
-                <option value="text-generation">Text Generation</option>
-                <option value="summarization">Summarization</option>
+                <option value="automatic-speech-recognition">ASR</option>
+                <option value="audio-classification">Audio Classification</option>
+                <option value="feature-extraction">Feature Extraction</option>
                 <option value="fill-mask">Fill Mask</option>
                 <option value="image-classification">Image Classification</option>
                 <option value="object-detection">Object Detection</option>
-                <option value="audio-classification">Audio Classification</option>
-                <option value="automatic-speech-recognition">ASR</option>
-                <option value="feature-extraction">Feature Extraction</option>
+                <option value="question-answering">Question Answering</option>
+                <option value="summarization">Summarization</option>
+                <option value="text-classification">Text Classification</option>
+                <option value="text-generation">Text Generation</option>
+                <option value="token-classification">Token Classification</option>
               </select>
             </div>
           </div>
@@ -1488,23 +1488,23 @@ label {
               <div class="form-row">
                 <label>Action</label>
                 <select id="hf-mod-action" style="font-size:10px">
-                  <option value="replace">Replace Module</option>
-                  <option value="remove">Remove Module</option>
-                  <option value="insert">Insert Module</option>
                   <option value="add_head">Add Output Head</option>
+                  <option value="insert">Insert Module</option>
+                  <option value="remove">Remove Module</option>
+                  <option value="replace">Replace Module</option>
                 </select>
               </div>
               <div class="form-row">
                 <label>Type</label>
                 <select id="hf-mod-type" style="font-size:10px">
-                  <option value="Linear">Linear</option>
                   <option value="Conv2d">Conv2d</option>
-                  <option value="LayerNorm">LayerNorm</option>
-                  <option value="RMSNorm">RMSNorm</option>
-                  <option value="SwiGLUFFN">SwiGLU FFN</option>
-                  <option value="GeGLUFFN">GeGLU FFN</option>
                   <option value="Dropout">Dropout</option>
                   <option value="GELU">GELU</option>
+                  <option value="GeGLUFFN">GeGLU FFN</option>
+                  <option value="LayerNorm">LayerNorm</option>
+                  <option value="Linear">Linear</option>
+                  <option value="RMSNorm">RMSNorm</option>
+                  <option value="SwiGLUFFN">SwiGLU FFN</option>
                 </select>
               </div>
             </div>
@@ -1556,6 +1556,32 @@ label {
           </div>
           <button class="btn btn-block mt-6" onclick="hfSearchDatasets()">Search</button>
           <div id="hf-ds-search-results" class="mt-6" style="max-height:180px;overflow-y:auto"></div>
+
+          <!-- Column Mapping (shown after dataset load) -->
+          <div id="hf-col-mapping" class="hidden" style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:8px;background:var(--surface2)">
+            <div style="font-size:9px;text-transform:uppercase;color:var(--text-faint);letter-spacing:1px;margin-bottom:6px">Column Mapping</div>
+            <p style="font-size:8px;color:var(--text-faint);margin-bottom:6px">Map dataset columns to model inputs. Auto-detected where possible.</p>
+            <div class="form-row">
+              <label>Text Column</label>
+              <select id="hf-col-text" style="font-size:10px"></select>
+            </div>
+            <div class="form-row">
+              <label>Label Column</label>
+              <select id="hf-col-label" style="font-size:10px"></select>
+            </div>
+            <div class="form-row">
+              <label>Max Length</label>
+              <input type="number" id="hf-col-maxlen" value="128" min="16" max="2048" style="font-size:10px">
+            </div>
+            <button class="btn btn-block mt-6" style="background:var(--accent2);color:#fff" onclick="hfPreprocessDataset()">Preprocess Dataset</button>
+            <div id="hf-preprocess-info" style="font-size:9px;color:var(--text-dim);margin-top:4px"></div>
+          </div>
+
+          <div id="hf-ds-preview" class="hidden" style="margin-top:8px">
+            <div style="font-size:9px;text-transform:uppercase;color:var(--text-faint);letter-spacing:1px;margin-bottom:4px">Preview</div>
+            <div id="hf-ds-preview-table" style="max-height:120px;overflow:auto;font-size:9px"></div>
+          </div>
+
           <div class="ds-category mt-6">Or Load Local Files</div>
           <div class="form-row">
             <label>Format</label>
@@ -1659,13 +1685,13 @@ label {
           <div class="form-row">
             <select id="us-chat-template">
               <option value="">None</option>
+              <option value="alpaca">Alpaca</option>
               <option value="chatml">ChatML</option>
+              <option value="gemma">Gemma</option>
               <option value="llama-3">LLaMA-3</option>
               <option value="mistral">Mistral</option>
-              <option value="gemma">Gemma</option>
               <option value="phi-3">Phi-3</option>
               <option value="qwen-2.5">Qwen 2.5</option>
-              <option value="alpaca">Alpaca</option>
               <option value="zephyr">Zephyr</option>
             </select>
           </div>
@@ -2130,9 +2156,9 @@ label {
             <label>Algorithm</label>
             <select id="tok-algorithm" style="font-size:10px">
               <option value="bpe">BPE (GPT-style)</option>
-              <option value="wordpiece">WordPiece (BERT-style)</option>
-              <option value="unigram">Unigram (T5/SentencePiece-style)</option>
               <option value="char">Character-level</option>
+              <option value="unigram">Unigram (T5/SentencePiece-style)</option>
+              <option value="wordpiece">WordPiece (BERT-style)</option>
             </select>
           </div>
           <div class="form-row-inline">
@@ -2592,12 +2618,12 @@ label {
           <label>Benchmark Suite</label>
           <select id="bench-suite" style="font-size:10px">
             <option value="all">All Suites</option>
-            <option value="math">Math Reasoning (GSM8K-style)</option>
-            <option value="logic">Logical Reasoning</option>
+            <option value="chain_of_thought">Chain-of-Thought</option>
             <option value="code">Code Generation</option>
             <option value="commonsense">Commonsense Reasoning</option>
+            <option value="logic">Logical Reasoning</option>
+            <option value="math">Math Reasoning (GSM8K-style)</option>
             <option value="reading">Reading Comprehension</option>
-            <option value="chain_of_thought">Chain-of-Thought</option>
           </select>
         </div>
         <div class="form-row">
@@ -2674,8 +2700,8 @@ label {
         <div class="form-row">
           <label>Strategy</label>
           <select id="hp-strategy" style="font-size:10px">
-            <option value="random">Random Search</option>
             <option value="grid">Grid Search</option>
+            <option value="random">Random Search</option>
           </select>
         </div>
         <div class="form-row">
@@ -2710,10 +2736,10 @@ label {
         <div class="form-row">
           <select id="dist-strategy" style="font-size:10px">
             <option value="accelerate">Accelerate (auto)</option>
-            <option value="ddp">PyTorch DDP</option>
-            <option value="fsdp">FSDP</option>
             <option value="deepspeed_zero2">DeepSpeed ZeRO-2</option>
             <option value="deepspeed_zero3">DeepSpeed ZeRO-3</option>
+            <option value="fsdp">FSDP</option>
+            <option value="ddp">PyTorch DDP</option>
           </select>
         </div>
         <button class="btn btn-sm btn-block mt-6" onclick="genDistScript()">Generate Script</button>
@@ -2723,10 +2749,10 @@ label {
         <h3>Cloud Training</h3>
         <div class="form-row">
           <select id="cloud-provider" style="font-size:10px">
-            <option value="modal">Modal (serverless)</option>
-            <option value="runpod">RunPod</option>
             <option value="sagemaker">AWS SageMaker</option>
             <option value="vertex_ai">Google Vertex AI</option>
+            <option value="modal">Modal (serverless)</option>
+            <option value="runpod">RunPod</option>
           </select>
         </div>
         <button class="btn btn-sm btn-block mt-6" onclick="genCloudScript()">Generate Script</button>
@@ -2736,9 +2762,9 @@ label {
         <h3>Federated Learning</h3>
         <div class="form-row">
           <select id="fl-strategy" style="font-size:10px">
+            <option value="FedAdam">FedAdam</option>
             <option value="FedAvg">FedAvg</option>
             <option value="FedProx">FedProx</option>
-            <option value="FedAdam">FedAdam</option>
           </select>
         </div>
         <div class="flex gap-4 mt-6">
@@ -2751,11 +2777,11 @@ label {
         <h3>Video Models</h3>
         <div class="form-row">
           <select id="video-model" style="font-size:10px">
-            <option value="videomae">VideoMAE (classification)</option>
-            <option value="timesformer">TimeSformer (classification)</option>
-            <option value="cogvideo">CogVideo (generation)</option>
             <option value="animatediff">AnimateDiff (generation)</option>
+            <option value="cogvideo">CogVideo (generation)</option>
+            <option value="timesformer">TimeSformer (classification)</option>
             <option value="video_llava">Video-LLaVA (understanding)</option>
+            <option value="videomae">VideoMAE (classification)</option>
           </select>
         </div>
         <button class="btn btn-sm btn-block mt-6" onclick="genVideoScript()">Generate Script</button>
@@ -2765,18 +2791,18 @@ label {
         <h3>Embeddings</h3>
         <div class="form-row">
           <select id="emb-task" style="font-size:10px">
-            <option value="similarity">Similarity (pairs)</option>
-            <option value="retrieval">Retrieval (query-doc)</option>
             <option value="classification">Classification (SetFit)</option>
+            <option value="retrieval">Retrieval (query-doc)</option>
+            <option value="similarity">Similarity (pairs)</option>
             <option value="from_scratch">Train from Scratch</option>
           </select>
         </div>
         <div class="form-row">
           <select id="emb-model" style="font-size:10px">
-            <option value="sentence-transformers/all-MiniLM-L6-v2">MiniLM-L6 (384d, fast)</option>
-            <option value="sentence-transformers/all-mpnet-base-v2">MPNet-base (768d, quality)</option>
             <option value="BAAI/bge-large-en-v1.5">BGE-large (1024d, best)</option>
             <option value="BAAI/bge-m3">BGE-M3 (multilingual)</option>
+            <option value="sentence-transformers/all-MiniLM-L6-v2">MiniLM-L6 (384d, fast)</option>
+            <option value="sentence-transformers/all-mpnet-base-v2">MPNet-base (768d, quality)</option>
             <option value="nomic-ai/nomic-embed-text-v1.5">Nomic (768d, open)</option>
           </select>
         </div>
@@ -2938,11 +2964,11 @@ label {
       <div class="form-row">
         <label>Category</label>
         <select id="rl-env-category" onchange="rlOnCategoryChange()" style="font-size:10px">
-          <option value="classic">Classic Control</option>
           <option value="box2d">Box2D</option>
+          <option value="classic">Classic Control</option>
+          <option value="custom">Custom Grid World</option>
           <option value="mujoco">MuJoCo (Robotics)</option>
           <option value="pybullet">PyBullet (Robotics)</option>
-          <option value="custom">Custom Grid World</option>
         </select>
       </div>
       <div class="form-row">
@@ -3153,9 +3179,9 @@ label {
         <div class="form-row">
           <select id="ai-provider" style="font-size:10px" onchange="onAIProviderChange()">
             <option value="claude">Claude (Anthropic)</option>
-            <option value="openai">OpenAI (GPT-4)</option>
-            <option value="ollama">Ollama (Local)</option>
             <option value="custom">Custom API</option>
+            <option value="ollama">Ollama (Local)</option>
+            <option value="openai">OpenAI (GPT-4)</option>
           </select>
         </div>
         <div class="form-row">
@@ -3489,8 +3515,14 @@ function handleWsEvent(event, data) {
       document.getElementById('progress-text').textContent = 'Complete';
       toast('Training complete!', 'success');
       break;
+    case 'training_error':
+      toast('Training failed: ' + data.error, 'error');
+      console.error('Training error:', data.traceback);
+      setTrainingUI(false);
+      break;
     case 'error':
       toast(data.message, 'error');
+      if (data.traceback) console.error('Error traceback:', data.traceback);
       setTrainingUI(false);
       break;
     case 'hf_model_loaded':
@@ -4869,8 +4901,83 @@ async function hfLoadDataset(datasetId) {
     info.textContent = `${res.dataset} | ${res.n_samples} samples | columns: ${(res.columns||[]).join(', ')}`;
     info.classList.add('visible');
     toast(`Dataset loaded: ${res.n_samples} samples`, 'success');
+    await hfShowColumnMapping();
   } else {
     toast(res.message || 'Failed', 'error');
+  }
+}
+
+async function hfShowColumnMapping() {
+  const cols = await api('/api/hf/datasets/columns');
+  if (!cols.columns || !cols.columns.length) return;
+
+  const textSel = document.getElementById('hf-col-text');
+  const labelSel = document.getElementById('hf-col-label');
+  textSel.innerHTML = '<option value="">(none)</option>';
+  labelSel.innerHTML = '<option value="">(none)</option>';
+
+  cols.columns.sort().forEach(c => {
+    textSel.innerHTML += `<option value="${c}">${c}</option>`;
+    labelSel.innerHTML += `<option value="${c}">${c}</option>`;
+  });
+
+  // Auto-select detected columns
+  if (cols.text) textSel.value = cols.text;
+  if (cols.label) labelSel.value = cols.label;
+
+  document.getElementById('hf-col-mapping').classList.remove('hidden');
+  document.getElementById('hf-preprocess-info').textContent = '';
+
+  // Show preview
+  const preview = await api('/api/hf/datasets/preview?n=3');
+  if (preview.samples && preview.samples.length) {
+    const previewDiv = document.getElementById('hf-ds-preview');
+    const table = document.getElementById('hf-ds-preview-table');
+    const allCols = Object.keys(preview.samples[0]);
+    let html = '<table style="width:100%;border-collapse:collapse"><tr>';
+    allCols.forEach(c => { html += `<th style="border:1px solid var(--border);padding:2px 4px;background:var(--surface)">${c}</th>`; });
+    html += '</tr>';
+    preview.samples.forEach(row => {
+      html += '<tr>';
+      allCols.forEach(c => {
+        const val = String(row[c] || '').substring(0, 80);
+        html += `<td style="border:1px solid var(--border);padding:2px 4px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${val}</td>`;
+      });
+      html += '</tr>';
+    });
+    html += '</table>';
+    table.innerHTML = html;
+    previewDiv.classList.remove('hidden');
+  }
+}
+
+async function hfPreprocessDataset() {
+  const textCol = document.getElementById('hf-col-text').value;
+  const labelCol = document.getElementById('hf-col-label').value;
+  const maxLen = parseInt(document.getElementById('hf-col-maxlen').value) || 128;
+  const infoEl = document.getElementById('hf-preprocess-info');
+
+  if (!textCol) {
+    toast('Select a text column', 'error');
+    return;
+  }
+
+  infoEl.innerHTML = '<span style="color:var(--warning)">Preprocessing...</span>';
+  const res = await api('/api/hf/datasets/preprocess', 'POST', {
+    text_column: textCol,
+    label_column: labelCol || 'label',
+    max_length: maxLen,
+  });
+
+  if (res.status === 'preprocessed') {
+    const colInfo = typeof res.columns === 'object' && !Array.isArray(res.columns)
+      ? Object.entries(res.columns).map(([k, v]) => `${k}: [${v.join(', ')}]`).join(' | ')
+      : (res.columns || []).join(', ');
+    infoEl.innerHTML = `<span style="color:var(--success)">Ready for training | ${colInfo}</span>`;
+    toast('Dataset preprocessed — ready to train', 'success');
+  } else {
+    infoEl.innerHTML = `<span style="color:var(--danger)">${res.message || 'Preprocessing failed'}</span>`;
+    toast(res.message || 'Preprocessing failed', 'error');
   }
 }
 
@@ -4881,7 +4988,11 @@ async function hfLoadLocalDataset() {
 
   const res = await api('/api/hf/datasets/local', 'POST', { format: fmt, path });
   if (res.status === 'loaded') {
+    const info = document.getElementById('hf-data-info');
+    info.textContent = `${res.dataset} | ${res.n_samples} samples | columns: ${(res.columns||[]).join(', ')}`;
+    info.classList.add('visible');
     toast(`Local dataset loaded: ${res.n_samples} samples`, 'success');
+    await hfShowColumnMapping();
   } else {
     toast(res.message || 'Failed', 'error');
   }
@@ -4969,10 +5080,10 @@ async function initLibraries() {
   libCatalog = res.libraries || {};
   const sel = document.getElementById('lib-select');
   sel.innerHTML = '';
-  Object.entries(libCatalog).forEach(([cat, libs]) => {
+  Object.entries(libCatalog).sort((a, b) => a[0].localeCompare(b[0])).forEach(([cat, libs]) => {
     const g = document.createElement('optgroup');
     g.label = cat.charAt(0).toUpperCase() + cat.slice(1);
-    libs.forEach(l => { g.innerHTML += `<option value="${l.id}">${l.name}</option>`; });
+    [...libs].sort((a, b) => a.name.localeCompare(b.name)).forEach(l => { g.innerHTML += `<option value="${l.id}">${l.name}</option>`; });
     sel.appendChild(g);
   });
   onLibSelect();
@@ -5102,7 +5213,7 @@ async function openRobotics() {
     const tRes = await api('/api/robotics/templates');
     const sel = document.getElementById('rob-template');
     sel.innerHTML = '';
-    Object.entries(tRes.templates || {}).forEach(([k, v]) => {
+    Object.entries(tRes.templates || {}).sort((a, b) => a[1].name.localeCompare(b[1].name)).forEach(([k, v]) => {
       sel.innerHTML += `<option value="${k}">${v.name} (${v.component_count} parts)</option>`;
     });
   }
@@ -5118,9 +5229,9 @@ function closeRobotics() {
 function renderRobPalette() {
   const container = document.getElementById('rob-component-palette');
   container.innerHTML = '';
-  Object.entries(robComponents).forEach(([cat, items]) => {
+  Object.entries(robComponents).sort((a, b) => a[0].localeCompare(b[0])).forEach(([cat, items]) => {
     container.innerHTML += `<div class="ds-category">${cat}</div>`;
-    items.forEach(c => {
+    [...items].sort((a, b) => a.name.localeCompare(b.name)).forEach(c => {
       container.innerHTML += `<div class="comp-item" onclick="robAddComponent('${c.id}')">
         <div class="comp-dot" style="background:${c.color}"></div>
         <span>${c.name}</span>
@@ -5637,7 +5748,7 @@ async function openRL() {
     // Populate algo select
     const algoSel = document.getElementById('rl-algo');
     algoSel.innerHTML = '';
-    Object.entries(rlAlgos).forEach(([id, a]) => {
+    Object.entries(rlAlgos).sort((a, b) => a[0].localeCompare(b[0])).forEach(([id, a]) => {
       algoSel.innerHTML += `<option value="${id}">${id} — ${a.name}</option>`;
     });
 
@@ -5663,7 +5774,7 @@ function rlOnCategoryChange() {
   }
 
   const envs = rlEnvs[cat] || {};
-  Object.entries(envs).forEach(([id, info]) => {
+  Object.entries(envs).sort((a, b) => a[0].localeCompare(b[0])).forEach(([id, info]) => {
     sel.innerHTML += `<option value="${id}">${id}</option>`;
   });
   rlOnEnvChange();
@@ -5886,10 +5997,10 @@ async function openDataEng() {
       if (!categories[c.category]) categories[c.category] = [];
       categories[c.category].push({ id, ...c });
     });
-    Object.entries(categories).forEach(([cat, conns]) => {
+    Object.entries(categories).sort((a, b) => a[0].localeCompare(b[0])).forEach(([cat, conns]) => {
       const g1 = document.createElement('optgroup'); g1.label = cat.toUpperCase();
       const g2 = document.createElement('optgroup'); g2.label = cat.toUpperCase();
-      conns.forEach(c => {
+      conns.sort((a, b) => a.name.localeCompare(b.name)).forEach(c => {
         g1.innerHTML += `<option value="${c.id}">${c.name}</option>`;
         g2.innerHTML += `<option value="${c.id}">${c.name}</option>`;
       });
@@ -5903,7 +6014,7 @@ async function openDataEng() {
     deTransforms = res.transforms || {};
     const sel = document.getElementById('de-transform-type');
     sel.innerHTML = '';
-    Object.entries(deTransforms).forEach(([id, t]) => {
+    Object.entries(deTransforms).sort((a, b) => a[1].name.localeCompare(b[1].name)).forEach(([id, t]) => {
       sel.innerHTML += `<option value="${id}">${t.name}</option>`;
     });
     deOnTransformChange();
@@ -6842,10 +6953,10 @@ async function initUnsloth() {
   const res = await api('/api/unsloth/models');
   const sel = document.getElementById('us-model-preset');
   if (res.models) {
-    Object.entries(res.models).forEach(([family, models]) => {
+    Object.entries(res.models).sort((a, b) => a[0].localeCompare(b[0])).forEach(([family, models]) => {
       const group = document.createElement('optgroup');
       group.label = family.charAt(0).toUpperCase() + family.slice(1);
-      models.forEach(m => { group.innerHTML += `<option value="${m}">${m.split('/').pop()}</option>`; });
+      [...models].sort().forEach(m => { group.innerHTML += `<option value="${m}">${m.split('/').pop()}</option>`; });
       sel.appendChild(group);
     });
   }
@@ -7560,10 +7671,10 @@ async function initDatasetFactory() {
     if (!byCategory[cat]) byCategory[cat] = [];
     byCategory[cat].push({ id, ...t });
   });
-  Object.entries(byCategory).forEach(([cat, templates]) => {
+  Object.entries(byCategory).sort((a, b) => a[0].localeCompare(b[0])).forEach(([cat, templates]) => {
     const group = document.createElement('optgroup');
     group.label = cat.charAt(0).toUpperCase() + cat.slice(1);
-    templates.forEach(t => {
+    templates.sort((a, b) => a.name.localeCompare(b.name)).forEach(t => {
       const opt = document.createElement('option');
       opt.value = t.id;
       opt.textContent = t.name;
