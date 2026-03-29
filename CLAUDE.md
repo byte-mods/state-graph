@@ -23,7 +23,8 @@ state-graph                     # Opens UI at http://localhost:8765
 - `state_graph/core/metrics.py` — Per-layer metrics (gradients, weights, activations)
 - `state_graph/core/scheduler.py` — 10 LR schedulers with defaults
 - `state_graph/core/data.py` — 8 synthetic + 5 real datasets, augmentation pipeline
-- `state_graph/layers/custom.py` — TransformerBlock, PositionalEncoding, TokenEmbedding, SequencePool, ResidualBlock, GLU, etc.
+- `state_graph/layers/custom.py` — TransformerBlock, ResidualBlock, GLU, ResNetBlock, ConvNeXtBlock, MBConvBlock, VisionEncoder, DiffusionUNet, VAE, NoiseScheduler, VideoVAE, TemporalAttention, PerceiverResampler, DistillationWrapper, SelectiveScan, MambaBlock, RWKVBlock, RetentionLayer, HyenaOperator, XLSTM, GatedLinearRecurrence
+- `state_graph/layers/llm.py` — RMSNorm, RoPE, LLMAttention (GQA + Flash), SwiGLU/GeGLU/ReGLU, MoE, LLMModel, ComposableLLM, EncoderDecoderLLM, AdaptiveDepthLLM, MultiModalLLM, UnifiedMultiModalLLM, VideoEmbedding, 18 MODEL_BLUEPRINTS, 19 BLOCK_DESIGNS, CustomComponent
 
 ### HuggingFace Integration
 - `state_graph/hf/hub.py` — Model search, load (transformers/timm/diffusers), freeze/unfreeze, LoRA
@@ -50,7 +51,7 @@ state-graph                     # Opens UI at http://localhost:8765
 - `state_graph/workspace/executor.py` — Python code execution with stdout/stderr capture
 
 ### Server & UI
-- `state_graph/server/app.py` — FastAPI + WebSocket, 149 endpoints
+- `state_graph/server/app.py` — FastAPI + WebSocket, 291 endpoints (blueprints, novel architecture lab, diffusion training)
 - `state_graph/ui/index.html` — Single-page app: CodeMirror IDE, Three.js 3D, Chart.js, annotation tools
 
 ## Key Patterns
@@ -64,5 +65,5 @@ state-graph                     # Opens UI at http://localhost:8765
 ## Tests
 
 ```bash
-pytest tests/ -v  # 93 tests covering core, server, datasets
+pytest tests/ -v  # 598 tests covering core, server, datasets, LLM, blueprints
 ```

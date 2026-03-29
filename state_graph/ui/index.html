@@ -472,6 +472,201 @@ label {
   border: 2px dashed var(--border);
   border-radius: var(--radius);
   width: 100%;
+  display: none;
+}
+
+/* Dashboard Welcome */
+.dashboard-welcome {
+  width: 100%;
+  max-width: 600px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.dash-header {
+  text-align: center;
+  padding: 16px 0 8px;
+}
+.dash-header h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.dash-header p {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.dash-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.dash-card h3 {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+}
+.dash-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+.dash-stat {
+  background: var(--surface2);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  text-align: center;
+}
+.dash-stat .stat-val {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+.dash-stat .stat-val.accent { color: var(--accent); }
+.dash-stat .stat-val.accent2 { color: var(--accent2); }
+.dash-stat .stat-val.warn { color: var(--warning); }
+.dash-stat .stat-lbl {
+  font-size: 9px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-top: 2px;
+}
+.dash-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.dash-bar-row .bar-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  width: 36px;
+  flex-shrink: 0;
+}
+.dash-bar-row .bar-val {
+  font-size: 10px;
+  color: var(--text);
+  width: 42px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.dash-bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--surface2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.dash-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+.dash-bar-fill.cpu { background: var(--accent); }
+.dash-bar-fill.ram { background: var(--accent2); }
+.dash-bar-fill.gpu { background: var(--warning); }
+.dash-actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.dash-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  color: var(--text);
+  font-size: 11px;
+  font-family: inherit;
+}
+.dash-action-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.dash-action-btn .action-icon {
+  font-size: 16px;
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.dash-action-btn .action-text {
+  display: flex;
+  flex-direction: column;
+}
+.dash-action-btn .action-title {
+  font-weight: 600;
+  font-size: 11px;
+}
+.dash-action-btn .action-desc {
+  font-size: 9px;
+  color: var(--text-dim);
+  margin-top: 1px;
+}
+.dash-experiments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+.dash-exp-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: var(--surface2);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.dash-exp-row:hover { background: var(--surface3); }
+.dash-exp-name { color: var(--text); font-weight: 600; }
+.dash-exp-meta { color: var(--text-dim); }
+.dash-exp-metric { color: var(--accent2); font-weight: 600; }
+.dash-empty-state {
+  text-align: center;
+  padding: 12px;
+  color: var(--text-faint);
+  font-size: 10px;
+}
+.dash-shortcuts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 16px;
+}
+.dash-shortcut {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 10px;
+}
+.dash-shortcut .sc-label { color: var(--text-dim); }
+.dash-shortcut kbd {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 9px;
+  color: var(--text);
+  font-family: inherit;
 }
 
 /* Layer cards */
@@ -1908,6 +2103,44 @@ label {
 
     <!-- LLM Builder Panel -->
     <div id="llm-panel" class="hidden">
+      <!-- Model Blueprints Section -->
+      <div class="panel-section">
+        <div class="section-header" onclick="toggleSection(this)">
+          <span class="section-title">Model Blueprints</span>
+          <span class="section-toggle">&#9662;</span>
+        </div>
+        <div class="section-body">
+          <div style="font-size:9px;color:var(--text-dim);margin-bottom:8px">Build production architectures from scratch — Gemini, Claude, VeO3, Llama, Mamba, and more</div>
+          <div style="margin-bottom:8px">
+            <select id="blueprint-category" style="font-size:10px;width:100%" onchange="filterBlueprints()">
+              <option value="all">All Categories</option>
+              <option value="text_llm">Text LLMs (GPT, Llama, Claude, Mistral)</option>
+              <option value="encoder_decoder">Encoder-Decoder (T5)</option>
+              <option value="alternative">Alternative (Mamba, RWKV, RetNet)</option>
+              <option value="multimodal">Multimodal (Gemini, LLaVA)</option>
+              <option value="video_generation">Video Generation (VeO3)</option>
+              <option value="image_generation">Image Generation (Stable Diffusion)</option>
+              <option value="experimental">Experimental (Nano Banana, Custom)</option>
+              <option value="efficient">Efficient (Adaptive Depth)</option>
+            </select>
+          </div>
+          <div class="template-grid" id="blueprint-grid" style="max-height:280px;overflow-y:auto"></div>
+          <!-- Blueprint detail panel -->
+          <div id="blueprint-detail" class="hidden" style="margin-top:10px;padding:10px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div id="blueprint-detail-name" style="font-weight:600;font-size:12px"></div>
+              <button class="btn btn-sm" onclick="document.getElementById('blueprint-detail').classList.add('hidden')" style="padding:2px 6px">X</button>
+            </div>
+            <div id="blueprint-detail-desc" style="font-size:10px;color:var(--text-dim);margin:6px 0"></div>
+            <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap" id="blueprint-scale-buttons"></div>
+            <div id="blueprint-detail-tips" style="font-size:9px;color:var(--accent);margin-bottom:8px"></div>
+            <div id="blueprint-detail-arch" class="hidden" style="font-size:9px;color:var(--text-dim);margin-bottom:8px"></div>
+            <button class="btn btn-primary btn-block" onclick="buildFromBlueprint()">Build This Model</button>
+            <div id="blueprint-build-info" style="font-size:9px;color:var(--text-dim);margin-top:6px"></div>
+          </div>
+        </div>
+      </div>
+
       <div class="panel-section">
         <div class="section-header" onclick="toggleSection(this)">
           <span class="section-title">LLM Presets</span>
@@ -2050,6 +2283,17 @@ label {
               <option value="minimal">Minimal (Attn + FFN only)</option>
               <option value="deep_norm">Deep Norm (Post-norm)</option>
               <option value="moe_block">MoE Block</option>
+              <option value="mamba">Mamba SSM</option>
+              <option value="rwkv">RWKV</option>
+              <option value="retnet">RetNet (Retention)</option>
+              <option value="hyena">Hyena (Long Conv)</option>
+              <option value="xlstm">xLSTM</option>
+              <option value="griffin">Griffin (Gated Recurrence)</option>
+              <option value="hybrid_mamba_attn">Jamba (Mamba + Attention)</option>
+              <option value="parallel_moe_mamba">Parallel MoE + Mamba</option>
+              <option value="triple_hybrid">Triple Hybrid (SSM + Attn + Conv)</option>
+              <option value="retention_moe">RetNet + MoE</option>
+              <option value="hyena_attention_hybrid">Hyena + Attention</option>
               <option value="custom">Empty (Custom)</option>
             </select>
           </div>
@@ -2098,6 +2342,114 @@ label {
         </div>
       </div>
 
+      <!-- Novel Architecture Lab -->
+      <div class="panel-section">
+        <div class="section-header" onclick="toggleSection(this)">
+          <span class="section-title" style="color:#fc5c65">Novel Architecture Lab</span>
+          <span class="section-toggle">&#9662;</span>
+        </div>
+        <div class="section-body">
+          <p style="font-size:9px;color:var(--text-dim);margin-bottom:8px">Invent new architectures that don't exist yet. Pick a research template, modify it, validate, benchmark, and quick-train to test your ideas.</p>
+
+          <div class="form-row">
+            <label>Research Template</label>
+            <select id="novel-template" style="font-size:10px" onchange="loadNovelTemplate(this.value)">
+              <option value="">-- Pick a starting point --</option>
+              <option value="sparse_attention_ssm">Sparse Attention + SSM Fusion</option>
+              <option value="parallel_everything">Fully Parallel Block</option>
+              <option value="recursive_depth">Recursive / Shared-Weight</option>
+              <option value="gated_expert_ssm">Gated Expert SSM</option>
+              <option value="multi_scale_hybrid">Multi-Scale Processing</option>
+              <option value="custom_code_layer">Write Your Own Layer</option>
+            </select>
+          </div>
+
+          <div id="novel-template-info" class="hidden" style="padding:8px;background:var(--surface2);border-radius:4px;margin:8px 0">
+            <div id="novel-template-name" style="font-weight:600;font-size:11px;color:#fc5c65"></div>
+            <div id="novel-template-desc" style="font-size:9px;color:var(--text-dim);margin:4px 0"></div>
+            <div id="novel-template-experiments" style="font-size:9px;color:var(--accent);margin-top:4px"></div>
+          </div>
+
+          <div style="display:flex;gap:4px;margin-top:8px">
+            <button class="btn btn-sm" style="flex:1;background:#fc5c65;color:#fff" onclick="validateNovelArch()">Validate</button>
+            <button class="btn btn-sm" style="flex:1;background:#fd9644;color:#fff" onclick="benchmarkNovelArch()">Benchmark</button>
+            <button class="btn btn-sm" style="flex:1;background:#26de81;color:#fff" onclick="quickTrainNovel()">Quick Train</button>
+          </div>
+          <button class="btn btn-sm btn-block mt-6" style="background:#a55eea;color:#fff" onclick="runArchSearch()">Architecture Search (compare all designs)</button>
+          <div id="novel-result" style="font-size:9px;color:var(--text-dim);margin-top:6px;max-height:200px;overflow-y:auto"></div>
+
+          <!-- Full Custom Model from Code -->
+          <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:10px">
+            <div style="font-size:9px;text-transform:uppercase;color:#fc5c65;letter-spacing:1px;margin-bottom:4px">Full Custom Model (Python)</div>
+            <p style="font-size:8px;color:var(--text-faint);margin-bottom:4px">Define an entire model architecture in Python. Your class gets: torch, nn, F, math + all StateGraph layers (RMSNorm, LLMAttention, SelectiveScan, MoELayer, PerceiverResampler, etc.)</p>
+            <textarea id="novel-model-code" style="width:100%;min-height:140px;font-size:10px;font-family:monospace;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px;resize:vertical">class FrontierModel(nn.Module):
+    """Your novel architecture — define something that doesn't exist yet!"""
+    def __init__(self, vocab_size=32000, d_model=256, n_layers=6, n_heads=4, **kwargs):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.d_model = d_model
+        self.tok_emb = nn.Embedding(vocab_size, d_model)
+
+        # === YOUR NOVEL ARCHITECTURE HERE ===
+        # Available: RMSNorm, LLMAttention, SwiGLUFFN, MoELayer,
+        #   SelectiveScan, MambaBlock, PerceiverResampler, HyenaOperator,
+        #   RetentionLayer, GatedLinearRecurrence, XLSTM, and more!
+        self.layers = nn.ModuleList()
+        for i in range(n_layers):
+            self.layers.append(nn.ModuleDict({
+                'norm1': RMSNorm(d_model),
+                'ssm': SelectiveScan(d_model, d_state=16, expand=2),
+                'norm2': RMSNorm(d_model),
+                'attn': LLMAttention(d_model, n_heads=n_heads, max_len=2048),
+                'norm3': RMSNorm(d_model),
+                'ffn': SwiGLUFFN(d_model),
+            }))
+
+        self.norm = RMSNorm(d_model)
+        self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
+        self.lm_head.weight = self.tok_emb.weight  # weight tying
+
+    def forward(self, input_ids, labels=None):
+        x = self.tok_emb(input_ids.clamp(0, self.vocab_size - 1))
+        for layer in self.layers:
+            x = x + layer['ssm'](layer['norm1'](x))     # SSM path
+            x = x + layer['attn'](layer['norm2'](x))     # Attention path
+            x = x + layer['ffn'](layer['norm3'](x))      # FFN path
+        logits = self.lm_head(self.norm(x))
+        loss = None
+        if labels is not None:
+            loss = F.cross_entropy(
+                logits[:, :-1].contiguous().view(-1, self.vocab_size),
+                labels[:, 1:].contiguous().view(-1), ignore_index=-100)
+        return {"logits": logits, "loss": loss}</textarea>
+            <button class="btn btn-primary btn-block mt-6" onclick="buildModelFromCode()">Build Custom Model</button>
+            <div id="novel-model-info" style="font-size:9px;color:var(--text-dim);margin-top:6px"></div>
+          </div>
+
+          <!-- Custom Loss Function -->
+          <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:10px">
+            <div style="font-size:9px;text-transform:uppercase;color:#fc5c65;letter-spacing:1px;margin-bottom:4px">Custom Loss Function</div>
+            <select id="novel-loss-mode" style="font-size:10px;width:100%;margin-bottom:4px" onchange="document.getElementById('novel-loss-code-area').classList.toggle('hidden', this.value==='formula'); document.getElementById('novel-loss-formula-area').classList.toggle('hidden', this.value!=='formula');">
+              <option value="formula">Formula (one-liner)</option>
+              <option value="code">Full Python class</option>
+            </select>
+            <div id="novel-loss-formula-area">
+              <input type="text" id="novel-loss-formula" value="F.cross_entropy(logits[:, :-1].reshape(-1, vocab_size), labels[:, 1:].reshape(-1), ignore_index=-100)" style="font-size:9px;font-family:monospace;width:100%" placeholder="Formula using: logits, labels, vocab_size, F, torch">
+            </div>
+            <div id="novel-loss-code-area" class="hidden">
+              <textarea id="novel-loss-code" style="width:100%;min-height:80px;font-size:9px;font-family:monospace;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px">class CustomLoss(nn.Module):
+    def forward(self, logits, labels, **kwargs):
+        # Standard CE + label smoothing
+        ce = F.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1), ignore_index=-100)
+        smooth = -F.log_softmax(logits, dim=-1).mean()
+        return 0.9 * ce + 0.1 * smooth</textarea>
+            </div>
+            <button class="btn btn-sm btn-block mt-4" style="background:#fd9644;color:#fff" onclick="setCustomLoss()">Set Custom Loss</button>
+            <div id="novel-loss-info" style="font-size:9px;color:var(--text-dim);margin-top:4px"></div>
+          </div>
+        </div>
+      </div>
+
       <!-- Advanced Model Types -->
       <div class="panel-section">
         <div class="section-header" onclick="toggleSection(this)">
@@ -2138,6 +2490,35 @@ label {
               <div class="form-row"><label>Patch Size</label><input type="number" id="mm-patch-size" value="16" min="4"></div>
             </div>
             <button class="btn btn-block mt-6" style="background:#f9e2af;color:#1e1e2e" onclick="buildMultiModal()">Build Multi-Modal</button>
+          </div>
+
+          <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px">
+            <div style="font-size:9px;text-transform:uppercase;color:var(--text-faint);letter-spacing:1px;margin-bottom:4px">Diffusion Model (Image/Video Generation)</div>
+            <div class="form-row-inline">
+              <div class="form-row"><label>Image Size</label><input type="number" id="diff-img-size" value="64" min="16"></div>
+              <div class="form-row"><label>Base Channels</label><input type="number" id="diff-base-ch" value="64" min="16"></div>
+            </div>
+            <div class="form-row-inline">
+              <div class="form-row"><label>Noise Steps</label><input type="number" id="diff-steps" value="1000" min="100"></div>
+              <div class="form-row">
+                <label>Schedule</label>
+                <select id="diff-schedule" style="font-size:10px">
+                  <option value="cosine">Cosine</option>
+                  <option value="linear">Linear</option>
+                </select>
+              </div>
+            </div>
+            <label class="toggle-label"><input type="checkbox" id="diff-use-vae"> Latent Diffusion (VAE)</label>
+            <div class="form-row-inline" style="margin-top:6px">
+              <div class="form-row"><label>Epochs</label><input type="number" id="diff-epochs" value="10" min="1"></div>
+              <div class="form-row"><label>Batch Size</label><input type="number" id="diff-batch" value="4" min="1"></div>
+            </div>
+            <div style="display:flex;gap:4px;margin-top:6px">
+              <button class="btn" style="flex:1;background:#fc5c65;color:#fff;font-size:10px" onclick="trainDiffusionVAE()">Train VAE</button>
+              <button class="btn" style="flex:1;background:#fd9644;color:#fff;font-size:10px" onclick="trainDiffusion()">Train UNet</button>
+              <button class="btn" style="flex:1;background:#26de81;color:#fff;font-size:10px" onclick="generateDiffusion()">Generate</button>
+            </div>
+            <div id="diff-info" style="font-size:9px;color:var(--text-dim);margin-top:6px"></div>
           </div>
 
           <div id="adv-build-info" style="font-size:9px;color:var(--text-dim);margin-top:6px"></div>
@@ -2365,8 +2746,135 @@ label {
   <div class="panel-center">
     <div class="graph-area" id="graph-area">
       <div class="drop-zone" id="drop-zone">
-        <div class="drop-hint" id="drop-hint">
-          Drag layers here, use Quick Add, or pick a Template to start.
+        <div class="drop-hint" id="drop-hint"></div>
+        <div class="dashboard-welcome" id="dashboard-welcome">
+          <div class="dash-header">
+            <h2>StateGraph</h2>
+            <p>Neural Architecture Lab &mdash; Design, Train, Evaluate</p>
+          </div>
+
+          <!-- System Resources -->
+          <div class="dash-card">
+            <h3>System Resources</h3>
+            <div class="dash-stats-grid" style="margin-bottom:10px">
+              <div class="dash-stat">
+                <div class="stat-val accent" id="dash-cpu">--</div>
+                <div class="stat-lbl">CPU %</div>
+              </div>
+              <div class="dash-stat">
+                <div class="stat-val accent2" id="dash-ram">--</div>
+                <div class="stat-lbl">RAM Used</div>
+              </div>
+              <div class="dash-stat">
+                <div class="stat-val warn" id="dash-gpu">--</div>
+                <div class="stat-lbl">GPU</div>
+              </div>
+            </div>
+            <div class="dash-bar-row">
+              <span class="bar-label">CPU</span>
+              <div class="dash-bar-track"><div class="dash-bar-fill cpu" id="dash-cpu-bar" style="width:0%"></div></div>
+              <span class="bar-val" id="dash-cpu-val">0%</span>
+            </div>
+            <div class="dash-bar-row">
+              <span class="bar-label">RAM</span>
+              <div class="dash-bar-track"><div class="dash-bar-fill ram" id="dash-ram-bar" style="width:0%"></div></div>
+              <span class="bar-val" id="dash-ram-val">0%</span>
+            </div>
+            <div class="dash-bar-row">
+              <span class="bar-label">GPU</span>
+              <div class="dash-bar-track"><div class="dash-bar-fill gpu" id="dash-gpu-bar" style="width:0%"></div></div>
+              <span class="bar-val" id="dash-gpu-val">N/A</span>
+            </div>
+          </div>
+
+          <!-- Quick Actions -->
+          <div class="dash-card">
+            <h3>Quick Actions</h3>
+            <div class="dash-actions-grid">
+              <button class="dash-action-btn" onclick="setModelSource('graph')">
+                <span class="action-icon">+</span>
+                <span class="action-text">
+                  <span class="action-title">Add Layers</span>
+                  <span class="action-desc">Build architecture visually</span>
+                </span>
+              </button>
+              <button class="dash-action-btn" onclick="setModelSource('hf')">
+                <span class="action-icon">&#129303;</span>
+                <span class="action-text">
+                  <span class="action-title">HuggingFace</span>
+                  <span class="action-desc">Load pretrained models</span>
+                </span>
+              </button>
+              <button class="dash-action-btn" onclick="setModelSource('llm')">
+                <span class="action-icon">&#9638;</span>
+                <span class="action-text">
+                  <span class="action-title">LLM Builder</span>
+                  <span class="action-desc">Build custom LLMs</span>
+                </span>
+              </button>
+              <button class="dash-action-btn" onclick="openRL()">
+                <span class="action-icon">&#127918;</span>
+                <span class="action-text">
+                  <span class="action-title">RL Training</span>
+                  <span class="action-desc">Gymnasium environments</span>
+                </span>
+              </button>
+              <button class="dash-action-btn" onclick="openWorkspace()">
+                <span class="action-icon">&#128187;</span>
+                <span class="action-text">
+                  <span class="action-title">IDE / Workspace</span>
+                  <span class="action-desc">Code editor & projects</span>
+                </span>
+              </button>
+              <button class="dash-action-btn" onclick="document.getElementById('de-overlay').classList.add('active')">
+                <span class="action-icon">&#128202;</span>
+                <span class="action-text">
+                  <span class="action-title">Data Engineering</span>
+                  <span class="action-desc">Pipelines & connectors</span>
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Recent Experiments -->
+          <div class="dash-card">
+            <h3>Recent Experiments</h3>
+            <div class="dash-experiments-list" id="dash-experiments">
+              <div class="dash-empty-state">No experiments yet. Train a model and save a run to track results here.</div>
+            </div>
+          </div>
+
+          <!-- Platform Capabilities -->
+          <div class="dash-card">
+            <h3>Platform Capabilities</h3>
+            <div class="dash-stats-grid">
+              <div class="dash-stat">
+                <div class="stat-val accent" id="dash-layers-count">0</div>
+                <div class="stat-lbl">Layer Types</div>
+              </div>
+              <div class="dash-stat">
+                <div class="stat-val accent2" id="dash-datasets-count">13</div>
+                <div class="stat-lbl">Datasets</div>
+              </div>
+              <div class="dash-stat">
+                <div class="stat-val warn" id="dash-opts-count">0</div>
+                <div class="stat-lbl">Optimizers</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Keyboard Shortcuts -->
+          <div class="dash-card">
+            <h3>Keyboard Shortcuts</h3>
+            <div class="dash-shortcuts">
+              <div class="dash-shortcut"><span class="sc-label">Build model</span><kbd>Ctrl+B</kbd></div>
+              <div class="dash-shortcut"><span class="sc-label">Start training</span><kbd>Ctrl+T</kbd></div>
+              <div class="dash-shortcut"><span class="sc-label">Stop training</span><kbd>Ctrl+Q</kbd></div>
+              <div class="dash-shortcut"><span class="sc-label">Export Python</span><kbd>Ctrl+E</kbd></div>
+              <div class="dash-shortcut"><span class="sc-label">Save experiment</span><kbd>Ctrl+S</kbd></div>
+              <div class="dash-shortcut"><span class="sc-label">Toggle charts</span><kbd>Ctrl+G</kbd></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -3428,6 +3936,7 @@ const AUGMENTATIONS = [
 ];
 
 const LAYER_PARAMS = {
+  // ==================== Core ====================
   Linear: [{n:'in_features',t:'int',r:1},{n:'out_features',t:'int',r:1},{n:'bias',t:'bool',d:true}],
   Conv1d: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int',r:1},{n:'kernel_size',t:'int',r:1},{n:'stride',t:'int',d:1},{n:'padding',t:'int',d:0}],
   Conv2d: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int',r:1},{n:'kernel_size',t:'int',r:1},{n:'stride',t:'int',d:1},{n:'padding',t:'int',d:0}],
@@ -3435,6 +3944,8 @@ const LAYER_PARAMS = {
   ConvTranspose2d: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int',r:1},{n:'kernel_size',t:'int',r:1}],
   BatchNorm1d: [{n:'num_features',t:'int',r:1}],
   BatchNorm2d: [{n:'num_features',t:'int',r:1}],
+  GroupNorm: [{n:'num_groups',t:'int',r:1},{n:'num_channels',t:'int',r:1}],
+  InstanceNorm2d: [{n:'num_features',t:'int',r:1}],
   LayerNorm: [{n:'normalized_shape',t:'int',r:1}],
   Dropout: [{n:'p',t:'float',d:0.5}],
   Dropout2d: [{n:'p',t:'float',d:0.5}],
@@ -3443,17 +3954,133 @@ const LAYER_PARAMS = {
   GRU: [{n:'input_size',t:'int',r:1},{n:'hidden_size',t:'int',r:1},{n:'num_layers',t:'int',d:1}],
   MultiheadAttention: [{n:'embed_dim',t:'int',r:1},{n:'num_heads',t:'int',r:1}],
   Flatten: [{n:'start_dim',t:'int',d:1}],
+  AdaptiveAvgPool1d: [{n:'output_size',t:'int',r:1}],
   AdaptiveAvgPool2d: [{n:'output_size',t:'int',r:1}],
+  MaxPool1d: [{n:'kernel_size',t:'int',r:1}],
   MaxPool2d: [{n:'kernel_size',t:'int',r:1}],
   AvgPool2d: [{n:'kernel_size',t:'int',r:1}],
-  ResidualBlock: [{n:'in_features',t:'int',r:1},{n:'hidden_features',t:'int'}],
-  SqueezeExcite: [{n:'channels',t:'int',r:1},{n:'reduction',t:'int',d:4}],
-  GatedLinearUnit: [{n:'in_features',t:'int',r:1},{n:'out_features',t:'int',r:1}],
-  SwishLinear: [{n:'in_features',t:'int',r:1},{n:'out_features',t:'int',r:1}],
+
+  // ==================== Transformer ====================
   TransformerBlock: [{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',d:4},{n:'ffn_dim',t:'int'},{n:'dropout',t:'float',d:0.1}],
   PositionalEncoding: [{n:'d_model',t:'int',r:1},{n:'max_len',t:'int',d:512},{n:'dropout',t:'float',d:0.1}],
   TokenEmbedding: [{n:'in_features',t:'int',r:1},{n:'d_model',t:'int',r:1},{n:'seq_len',t:'int'}],
   SequencePool: [{n:'d_model',t:'int',r:1},{n:'mode',t:'str',d:'mean'}],
+
+  // ==================== Building Blocks ====================
+  ResidualBlock: [{n:'in_features',t:'int',r:1},{n:'hidden_features',t:'int'}],
+  SqueezeExcite: [{n:'channels',t:'int',r:1},{n:'reduction',t:'int',d:4}],
+  GatedLinearUnit: [{n:'in_features',t:'int',r:1},{n:'out_features',t:'int',r:1}],
+  SwishLinear: [{n:'in_features',t:'int',r:1},{n:'out_features',t:'int',r:1}],
+  Reshape: [{n:'shape',t:'str',r:1}],
+  GlobalAvgPool: [],
+
+  // ==================== Vision ====================
+  PatchEmbed: [{n:'in_channels',t:'int',d:3},{n:'d_model',t:'int',r:1},{n:'patch_size',t:'int',d:16},{n:'image_size',t:'int',d:224}],
+  DepthwiseSeparableConv: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int',r:1},{n:'kernel_size',t:'int',d:3},{n:'stride',t:'int',d:1},{n:'padding',t:'int',d:1}],
+  ChannelAttention: [{n:'channels',t:'int',r:1},{n:'reduction',t:'int',d:4}],
+  UpsampleBlock: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int',r:1}],
+  ResConvBlock: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int'}],
+  DownBlock: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int',r:1}],
+  UpBlock: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int',r:1}],
+  // Advanced Vision
+  WindowAttention: [{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',d:4},{n:'window_size',t:'int',d:7},{n:'shift',t:'bool',d:false}],
+  SwinTransformerBlock: [{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',d:4},{n:'window_size',t:'int',d:7},{n:'mlp_ratio',t:'float',d:4.0},{n:'dropout',t:'float',d:0.0}],
+  SwinStage: [{n:'d_model',t:'int',r:1},{n:'depth',t:'int',d:2},{n:'n_heads',t:'int',d:4},{n:'window_size',t:'int',d:7},{n:'downsample',t:'bool',d:true}],
+  CSPBlock: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int',r:1},{n:'n_bottlenecks',t:'int',d:3},{n:'shortcut',t:'bool',d:true}],
+  SPPFBlock: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int',r:1},{n:'kernel_size',t:'int',d:5}],
+  C2fBlock: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int',r:1},{n:'n_bottlenecks',t:'int',d:2},{n:'shortcut',t:'bool',d:true}],
+  FPNBlock: [{n:'out_channels',t:'int',d:256}],
+  DetectionHead: [{n:'in_channels',t:'int',d:256},{n:'num_classes',t:'int',d:80},{n:'num_anchors',t:'int',d:1}],
+  DETRTransformerDecoder: [{n:'d_model',t:'int',d:256},{n:'n_heads',t:'int',d:8},{n:'num_layers',t:'int',d:6},{n:'num_queries',t:'int',d:100},{n:'ffn_dim',t:'int',d:2048}],
+  StochasticDepth: [{n:'drop_prob',t:'float',d:0.1}],
+  EfficientChannelAttention: [{n:'channels',t:'int',r:1},{n:'kernel_size',t:'int',d:3}],
+  ConvNeXtBlock: [{n:'dim',t:'int',r:1},{n:'drop_path',t:'float',d:0.0},{n:'layer_scale_init',t:'float',d:1e-6}],
+  MultiScaleFeatureExtractor: [{n:'in_channels',t:'int',d:3}],
+
+  // ==================== Diffusion ====================
+  SinusoidalTimestepEmbed: [{n:'d_model',t:'int',r:1}],
+  ConditionalBatchNorm2d: [{n:'num_features',t:'int',r:1},{n:'cond_dim',t:'int',r:1}],
+  // Advanced Diffusion
+  AdaLayerNorm: [{n:'d_model',t:'int',r:1},{n:'cond_dim',t:'int',d:256}],
+  DiTBlock: [{n:'d_model',t:'int',d:768},{n:'n_heads',t:'int',d:12},{n:'mlp_ratio',t:'float',d:4.0},{n:'cond_dim',t:'int',d:256},{n:'dropout',t:'float',d:0.0}],
+  CrossAttention: [{n:'d_model',t:'int',d:256},{n:'context_dim',t:'int',d:768},{n:'n_heads',t:'int',d:8},{n:'dropout',t:'float',d:0.0}],
+  TimestepMLP: [{n:'d_model',t:'int',d:256},{n:'time_embed_dim',t:'int',d:1024}],
+  FiLMConditioner: [{n:'d_model',t:'int',r:1},{n:'cond_dim',t:'int',d:256}],
+  ResNetBlock2d: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int',r:1},{n:'time_embed_dim',t:'int',d:512},{n:'dropout',t:'float',d:0.0}],
+  SpatialTransformer: [{n:'in_channels',t:'int',r:1},{n:'d_model',t:'int',d:256},{n:'n_heads',t:'int',d:8},{n:'context_dim',t:'int',d:768},{n:'depth',t:'int',d:1}],
+  UNetDownBlock: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int',r:1},{n:'time_embed_dim',t:'int',d:512},{n:'num_layers',t:'int',d:2},{n:'has_attention',t:'bool',d:false},{n:'context_dim',t:'int',d:768},{n:'downsample',t:'bool',d:true}],
+  UNetUpBlock: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int',r:1},{n:'skip_channels',t:'int',d:0},{n:'time_embed_dim',t:'int',d:512},{n:'num_layers',t:'int',d:2},{n:'has_attention',t:'bool',d:false},{n:'context_dim',t:'int',d:768},{n:'upsample',t:'bool',d:true}],
+  UNetMidBlock: [{n:'channels',t:'int',r:1},{n:'time_embed_dim',t:'int',d:512},{n:'context_dim',t:'int',d:768},{n:'n_heads',t:'int',d:8}],
+  PatchEmbedDiT: [{n:'in_channels',t:'int',d:4},{n:'d_model',t:'int',d:768},{n:'patch_size',t:'int',d:2},{n:'image_size',t:'int',d:32}],
+  DiTFinalLayer: [{n:'d_model',t:'int',d:768},{n:'patch_size',t:'int',d:2},{n:'out_channels',t:'int',d:4}],
+  CFGScaler: [{n:'guidance_scale',t:'float',d:7.5}],
+
+  // ==================== Audio ====================
+  MelSpectrogram: [{n:'n_mels',t:'int',d:40},{n:'n_fft',t:'int',d:512},{n:'hop_length',t:'int',d:128}],
+  AudioConvBlock: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int',r:1},{n:'stride',t:'int',d:1}],
+  Transpose: [{n:'dim0',t:'int',r:1},{n:'dim1',t:'int',r:1}],
+  // Advanced Audio
+  CausalConv1d: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int',r:1},{n:'kernel_size',t:'int',d:3},{n:'dilation',t:'int',d:1}],
+  WaveNetBlock: [{n:'channels',t:'int',r:1},{n:'kernel_size',t:'int',d:3},{n:'dilation',t:'int',d:1},{n:'cond_channels',t:'int',d:0}],
+  ConformerConvModule: [{n:'d_model',t:'int',r:1},{n:'kernel_size',t:'int',d:31},{n:'dropout',t:'float',d:0.1}],
+  ConformerBlock: [{n:'d_model',t:'int',d:256},{n:'n_heads',t:'int',d:4},{n:'ffn_dim',t:'int',d:1024},{n:'kernel_size',t:'int',d:31},{n:'dropout',t:'float',d:0.1}],
+  VocoderUpsampleBlock: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int',r:1},{n:'upsample_rate',t:'int',d:8},{n:'kernel_size',t:'int',d:16}],
+  MultiReceptiveFieldFusion: [{n:'channels',t:'int',r:1}],
+  SpeakerEncoder: [{n:'in_channels',t:'int',d:40},{n:'d_model',t:'int',d:256},{n:'num_layers',t:'int',d:3}],
+  DurationPredictor: [{n:'d_model',t:'int',d:256},{n:'kernel_size',t:'int',d:3},{n:'num_layers',t:'int',d:2},{n:'dropout',t:'float',d:0.1}],
+  LengthRegulator: [{n:'d_model',t:'int',d:256}],
+  VariancePredictor: [{n:'d_model',t:'int',d:256},{n:'kernel_size',t:'int',d:3},{n:'num_layers',t:'int',d:2},{n:'dropout',t:'float',d:0.1}],
+  PitchEmbedding: [{n:'d_model',t:'int',d:256},{n:'num_bins',t:'int',d:256},{n:'pitch_min',t:'float',d:50.0},{n:'pitch_max',t:'float',d:800.0}],
+  MultiPeriodDiscriminator: [],
+  AudioPrenet: [{n:'in_features',t:'int',r:1},{n:'hidden_features',t:'int',d:256},{n:'out_features',t:'int',d:256},{n:'num_layers',t:'int',d:2}],
+  RelativePositionalEncoding: [{n:'d_model',t:'int',r:1},{n:'max_len',t:'int',d:5000}],
+
+  // ==================== Video ====================
+  Conv3dBlock: [{n:'in_channels',t:'int',r:1},{n:'out_channels',t:'int',r:1}],
+  TemporalPool: [{n:'d_model',t:'int',r:1},{n:'mode',t:'str',d:'mean'}],
+
+  // ==================== LLM ====================
+  RMSNorm: [{n:'d_model',t:'int',r:1}],
+  RotaryPositionalEmbedding: [{n:'d_model',t:'int',r:1}],
+  LLMAttention: [{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',r:1},{n:'n_kv_heads',t:'int'},{n:'dropout',t:'float',d:0.0}],
+  SwiGLUFFN: [{n:'d_model',t:'int',r:1},{n:'ffn_dim',t:'int'}],
+  GeGLUFFN: [{n:'d_model',t:'int',r:1},{n:'ffn_dim',t:'int'}],
+  ReGLUFFN: [{n:'d_model',t:'int',r:1},{n:'ffn_dim',t:'int'}],
+  StandardFFN: [{n:'d_model',t:'int',r:1},{n:'ffn_dim',t:'int'},{n:'dropout',t:'float',d:0.0}],
+  MoELayer: [{n:'d_model',t:'int',r:1},{n:'num_experts',t:'int',d:8},{n:'top_k',t:'int',d:2},{n:'ffn_dim',t:'int'}],
+  LLMDecoderBlock: [{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',r:1},{n:'ffn_type',t:'str',d:'swiglu'},{n:'norm_type',t:'str',d:'rmsnorm'},{n:'dropout',t:'float',d:0.0}],
+  LLMModel: [{n:'vocab_size',t:'int',r:1},{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',r:1},{n:'n_layers',t:'int',r:1}],
+  CustomFFN: [{n:'d_model',t:'int',r:1},{n:'ffn_dim',t:'int'},{n:'activation',t:'str',d:'gelu'}],
+  SlidingWindowAttention: [{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',r:1},{n:'window_size',t:'int',d:256}],
+  LinearAttention: [{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',r:1}],
+  ALiBiAttention: [{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',r:1}],
+  AbsolutePositionalEncoding: [{n:'d_model',t:'int',r:1},{n:'max_len',t:'int',d:2048}],
+  SinusoidalPositionalEncoding: [{n:'d_model',t:'int',r:1},{n:'max_len',t:'int',d:2048}],
+  ParallelBranch: [{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',r:1}],
+  ComposableBlock: [{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',r:1}],
+  ComposableLLM: [{n:'vocab_size',t:'int',r:1},{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',r:1},{n:'n_layers',t:'int',r:1}],
+
+  // ==================== Encoder-Decoder ====================
+  EncoderBlock: [{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',r:1},{n:'ffn_dim',t:'int'},{n:'dropout',t:'float',d:0.1}],
+  DecoderBlockWithCrossAttn: [{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',r:1},{n:'ffn_dim',t:'int'},{n:'dropout',t:'float',d:0.1}],
+  EncoderDecoderLLM: [{n:'vocab_size',t:'int',r:1},{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',r:1},{n:'n_enc_layers',t:'int',d:6},{n:'n_dec_layers',t:'int',d:6}],
+  AdaptiveDepthLLM: [{n:'vocab_size',t:'int',r:1},{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',r:1},{n:'n_layers',t:'int',r:1}],
+
+  // ==================== Multi-Modal ====================
+  PatchEmbedding: [{n:'in_channels',t:'int',d:3},{n:'d_model',t:'int',r:1},{n:'patch_size',t:'int',d:16},{n:'image_size',t:'int',d:224}],
+  AudioEmbedding: [{n:'n_mels',t:'int',d:80},{n:'d_model',t:'int',r:1}],
+  MultiModalLLM: [{n:'vocab_size',t:'int',r:1},{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',r:1},{n:'n_layers',t:'int',r:1}],
+
+  // ==================== SSM / Alternative Architectures ====================
+  SelectiveScan: [{n:'d_model',t:'int',r:1},{n:'d_state',t:'int',d:16}],
+  MambaBlock: [{n:'d_model',t:'int',r:1},{n:'d_state',t:'int',d:16},{n:'d_conv',t:'int',d:4},{n:'expand_factor',t:'int',d:2}],
+  RWKVBlock: [{n:'d_model',t:'int',r:1}],
+  RetentionLayer: [{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',d:4}],
+  RetNetBlock: [{n:'d_model',t:'int',r:1},{n:'n_heads',t:'int',d:4}],
+  HyenaOperator: [{n:'d_model',t:'int',r:1},{n:'order',t:'int',d:2},{n:'max_len',t:'int',d:1024}],
+  HyenaBlock: [{n:'d_model',t:'int',r:1}],
+  XLSTM: [{n:'d_model',t:'int',r:1},{n:'num_layers',t:'int',d:2}],
+  GatedLinearRecurrence: [{n:'d_model',t:'int',r:1}],
 };
 
 // ============================================================
@@ -3798,13 +4425,18 @@ function renderGraph(graphData) {
   graphNodes = graphData.nodes || [];
   const dropZone = document.getElementById('drop-zone');
   const hint = document.getElementById('drop-hint');
+  const dashboard = document.getElementById('dashboard-welcome');
 
   if (graphNodes.length === 0) {
     dropZone.innerHTML = '';
     dropZone.appendChild(hint);
-    hint.style.display = '';
+    dropZone.appendChild(dashboard);
+    dashboard.style.display = '';
+    hint.style.display = 'none';
+    refreshDashboard();
     return;
   }
+  dashboard.style.display = 'none';
   hint.style.display = 'none';
   dropZone.innerHTML = '';
 
@@ -8175,6 +8807,173 @@ async function deleteExperiment(id) {
 }
 
 // ============================================================
+// MODEL BLUEPRINTS
+// ============================================================
+let allBlueprints = {};
+let selectedBlueprint = null;
+let selectedScale = 'small';
+
+async function initBlueprints() {
+  try {
+    const res = await api('/api/llm/blueprints');
+    if (res && res.blueprints) {
+      allBlueprints = res.blueprints;
+      renderBlueprints();
+    }
+  } catch(e) { console.log('Blueprints not available'); }
+}
+
+function renderBlueprints() {
+  const grid = document.getElementById('blueprint-grid');
+  if (!grid) return;
+  const category = document.getElementById('blueprint-category').value;
+  grid.innerHTML = '';
+
+  const categoryColors = {
+    text_llm: '#4a9eff', encoder_decoder: '#ff9f43', alternative: '#a55eea',
+    multimodal: '#26de81', video_generation: '#fc5c65', image_generation: '#fd9644',
+    experimental: '#45aaf2', efficient: '#2bcbba',
+  };
+
+  Object.entries(allBlueprints).forEach(([key, bp]) => {
+    if (category !== 'all' && bp.category !== category) return;
+    const color = categoryColors[bp.category] || '#888';
+    const el = document.createElement('div');
+    el.className = 'template-card';
+    el.style.borderLeft = `3px solid ${color}`;
+    el.innerHTML = `<div class="t-name" style="font-size:10px">${bp.name}</div>
+      <div class="t-desc" style="font-size:8px;max-height:32px;overflow:hidden">${bp.description.substring(0,80)}...</div>
+      <div style="font-size:8px;color:${color};margin-top:2px">${bp.category.replace('_',' ')}</div>`;
+    el.onclick = () => selectBlueprint(key);
+    grid.appendChild(el);
+  });
+}
+
+function filterBlueprints() { renderBlueprints(); }
+
+function selectBlueprint(key) {
+  const bp = allBlueprints[key];
+  if (!bp) return;
+  selectedBlueprint = key;
+  selectedScale = 'small';
+
+  document.getElementById('blueprint-detail').classList.remove('hidden');
+  document.getElementById('blueprint-detail-name').textContent = bp.name;
+  document.getElementById('blueprint-detail-desc').textContent = bp.description;
+  document.getElementById('blueprint-detail-tips').textContent = bp.training_tips ? 'Tip: ' + bp.training_tips : '';
+
+  // Scale buttons
+  const scaleDiv = document.getElementById('blueprint-scale-buttons');
+  const scales = Object.keys(bp.scalable_configs || {});
+  if (scales.length > 0) {
+    scaleDiv.innerHTML = '<span style="font-size:9px;color:var(--text-faint)">Scale: </span>' +
+      scales.map(s => `<button class="btn btn-sm blueprint-scale-btn" data-scale="${s}" onclick="selectBlueprintScale('${s}')" style="padding:1px 8px;font-size:9px;${s==='small'?'background:var(--accent);color:#fff':''}">${s}</button>`).join('');
+  } else {
+    scaleDiv.innerHTML = '<span style="font-size:9px;color:var(--text-faint)">Default config (customize after build)</span>';
+  }
+
+  // Show architecture for multi-component models
+  const archDiv = document.getElementById('blueprint-detail-arch');
+  if (bp.architecture) {
+    archDiv.classList.remove('hidden');
+    archDiv.innerHTML = '<b>Components:</b><br>' + Object.entries(bp.architecture).map(([k,v]) =>
+      `&bull; <b>${k}</b>: ${v.description} (${v.class})`).join('<br>');
+  } else {
+    archDiv.classList.add('hidden');
+  }
+
+  // Also fill in the LLM config fields if it's a standard model
+  if (bp.config) {
+    const c = {...bp.config, ...(bp.scalable_configs?.[selectedScale] || {})};
+    if (c.vocab_size) document.getElementById('llm-vocab').value = c.vocab_size;
+    if (c.d_model) document.getElementById('llm-dmodel').value = c.d_model;
+    if (c.n_layers) document.getElementById('llm-nlayers').value = c.n_layers;
+    if (c.n_heads) document.getElementById('llm-nheads').value = c.n_heads;
+    if (c.max_len) document.getElementById('llm-maxlen').value = c.max_len;
+    document.getElementById('llm-nkvheads').value = c.n_kv_heads || '';
+    document.getElementById('llm-dropout').value = c.dropout || 0;
+    if (c.norm_type) document.getElementById('llm-norm-type').value = c.norm_type;
+    if (c.ffn_type) document.getElementById('llm-ffn-type').value = c.ffn_type;
+    document.getElementById('llm-rope-base').value = c.rope_base || 10000;
+    const isMoe = c.use_moe || false;
+    document.getElementById('llm-moe').checked = isMoe;
+    document.getElementById('llm-moe-config').classList.toggle('hidden', !isMoe);
+    if (isMoe) {
+      document.getElementById('llm-nexperts').value = c.n_experts || 8;
+      document.getElementById('llm-topk').value = c.moe_top_k || 2;
+    }
+  }
+}
+
+function selectBlueprintScale(scale) {
+  selectedScale = scale;
+  document.querySelectorAll('.blueprint-scale-btn').forEach(btn => {
+    btn.style.background = btn.dataset.scale === scale ? 'var(--accent)' : '';
+    btn.style.color = btn.dataset.scale === scale ? '#fff' : '';
+  });
+  // Update config fields
+  if (selectedBlueprint && allBlueprints[selectedBlueprint]) {
+    const bp = allBlueprints[selectedBlueprint];
+    const scaleConfig = bp.scalable_configs?.[scale] || {};
+    const c = {...bp.config, ...scaleConfig};
+    if (c.vocab_size) document.getElementById('llm-vocab').value = c.vocab_size;
+    if (c.d_model) document.getElementById('llm-dmodel').value = c.d_model;
+    if (c.n_layers) document.getElementById('llm-nlayers').value = c.n_layers;
+    if (c.n_heads) document.getElementById('llm-nheads').value = c.n_heads;
+    if (c.max_len) document.getElementById('llm-maxlen').value = c.max_len;
+    document.getElementById('llm-nkvheads').value = c.n_kv_heads || '';
+  }
+}
+
+async function buildFromBlueprint() {
+  if (!selectedBlueprint) { toast('Select a blueprint first', 'error'); return; }
+
+  const info = document.getElementById('blueprint-build-info');
+  info.textContent = 'Building...';
+
+  const body = {
+    blueprint: selectedBlueprint,
+    scale: selectedScale,
+    overrides: {},
+  };
+
+  // Collect any manual overrides from the LLM config fields
+  const vocab = parseInt(document.getElementById('llm-vocab').value);
+  const dmodel = parseInt(document.getElementById('llm-dmodel').value);
+  const nlayers = parseInt(document.getElementById('llm-nlayers').value);
+  const nheads = parseInt(document.getElementById('llm-nheads').value);
+  const bp = allBlueprints[selectedBlueprint];
+  const scaleConfig = bp.scalable_configs?.[selectedScale] || {};
+  const baseConfig = {...bp.config, ...scaleConfig};
+
+  // Only override if user changed from the preset value
+  if (vocab !== (baseConfig.vocab_size || 32000)) body.overrides.vocab_size = vocab;
+  if (dmodel !== (baseConfig.d_model || 512)) body.overrides.d_model = dmodel;
+  if (nlayers !== (baseConfig.n_layers || 6)) body.overrides.n_layers = nlayers;
+  if (nheads !== (baseConfig.n_heads || 8)) body.overrides.n_heads = nheads;
+
+  try {
+    const res = await api('/api/llm/blueprint/build', 'POST', body);
+    if (res.status === 'ok') {
+      const paramStr = res.parameters ? res.parameters.total_M : 'N/A';
+      info.innerHTML = `<span style="color:var(--success)">Built: ${res.name} — ${paramStr} params</span>`;
+      toast(`${res.name} built: ${paramStr} parameters`, 'success');
+      window._lastModelType = 'blueprint';
+      window._lastBlueprint = selectedBlueprint;
+      // Show layer editor for single-model blueprints
+      if (res.model_class !== 'custom') {
+        document.getElementById('llm-layer-editor').classList.remove('hidden');
+      }
+    } else {
+      info.innerHTML = `<span style="color:var(--danger)">${res.message || 'Build failed'}</span>`;
+      toast(res.message || 'Build failed', 'error');
+    }
+  } catch(e) {
+    info.innerHTML = `<span style="color:var(--danger)">Error: ${e.message}</span>`;
+  }
+}
+
+// ============================================================
 // LLM BUILDER
 // ============================================================
 let llmPresets = {};
@@ -8699,6 +9498,261 @@ async function trainTokenizer() {
 }
 
 // ============================================================
+// NOVEL ARCHITECTURE LAB
+// ============================================================
+let novelTemplates = {};
+let selectedNovelTemplate = null;
+
+async function loadNovelTemplates() {
+  try {
+    const res = await api('/api/llm/novel/templates');
+    if (res && res.templates) novelTemplates = res.templates;
+  } catch(e) {}
+}
+loadNovelTemplates();
+
+function loadNovelTemplate(key) {
+  if (!key || !novelTemplates[key]) {
+    document.getElementById('novel-template-info').classList.add('hidden');
+    selectedNovelTemplate = null;
+    return;
+  }
+  const t = novelTemplates[key];
+  selectedNovelTemplate = t;
+  document.getElementById('novel-template-info').classList.remove('hidden');
+  document.getElementById('novel-template-name').textContent = t.name;
+  document.getElementById('novel-template-desc').textContent = t.description;
+  document.getElementById('novel-template-experiments').innerHTML =
+    '<b>Try:</b> ' + (t.experiments || []).map(e => '<br>&bull; ' + e).join('');
+
+  // Also load the block design into the Block Composer
+  if (t.block_design && typeof window.loadStepsFromDesign === 'function') {
+    window.loadStepsFromDesign(t.block_design);
+  }
+}
+
+function _getNovelBlockDesign() {
+  // Get from the Block Composer's current steps
+  if (selectedNovelTemplate && selectedNovelTemplate.block_design) {
+    return selectedNovelTemplate.block_design;
+  }
+  // Try getting from compose steps UI
+  if (typeof window.getComposeSteps === 'function') {
+    return window.getComposeSteps();
+  }
+  return null;
+}
+
+async function validateNovelArch() {
+  const design = _getNovelBlockDesign();
+  if (!design) { toast('Select a template or build steps in Block Composer', 'error'); return; }
+  const info = document.getElementById('novel-result');
+  info.textContent = 'Validating...';
+  const res = await api('/api/llm/novel/validate', 'POST', {
+    block_design: design,
+    d_model: parseInt(document.getElementById('llm-dmodel').value) || 128,
+    n_heads: parseInt(document.getElementById('llm-nheads').value) || 4,
+    vocab_size: 1000, n_layers: 2, seq_len: 32,
+  });
+  if (res.status === 'valid') {
+    info.innerHTML = `<span style="color:var(--success)">VALID</span> | ${res.total_params_M} params | loss=${res.loss?.toFixed(3) || 'N/A'}<br>Steps: ${res.step_types.join(' -> ')}`;
+  } else {
+    info.innerHTML = `<span style="color:var(--danger)">${res.stage || 'Error'}: ${res.message}</span>`;
+  }
+}
+
+async function benchmarkNovelArch() {
+  const design = _getNovelBlockDesign();
+  if (!design) { toast('Select a template first', 'error'); return; }
+  const info = document.getElementById('novel-result');
+  info.textContent = 'Benchmarking against Llama, Mamba, Minimal...';
+  const res = await api('/api/llm/novel/validate', 'POST', {
+    block_design: design,
+    d_model: parseInt(document.getElementById('llm-dmodel').value) || 128,
+    n_heads: parseInt(document.getElementById('llm-nheads').value) || 4,
+    vocab_size: 1000, n_layers: 2, seq_len: 32, benchmark: true,
+  });
+  if (res.status === 'valid' && res.benchmarks) {
+    let html = `<span style="color:var(--success)">VALID</span> | ${res.total_params_M} params<br><b>Benchmarks:</b><br>`;
+    for (const [name, b] of Object.entries(res.benchmarks)) {
+      const color = b.speedup >= 1 ? 'var(--success)' : 'var(--danger)';
+      html += `&bull; vs <b>${name}</b>: <span style="color:${color}">${b.speedup}x speed</span>, ${b.param_ratio}x params (${b.novel_ms}ms vs ${b.baseline_ms}ms)<br>`;
+    }
+    info.innerHTML = html;
+  } else {
+    info.innerHTML = `<span style="color:var(--danger)">${res.message || 'Benchmark failed'}</span>`;
+  }
+}
+
+async function quickTrainNovel() {
+  const design = _getNovelBlockDesign();
+  if (!design) { toast('Select a template first', 'error'); return; }
+  let text = document.getElementById('llm-train-text')?.value || '';
+  if (text.length < 100) {
+    text = 'The quick brown fox jumps over the lazy dog. '.repeat(50) +
+      'Machine learning models process sequences of tokens to learn patterns in data. '.repeat(30) +
+      'Attention mechanisms allow models to focus on relevant parts of the input. '.repeat(30);
+  }
+  const info = document.getElementById('novel-result');
+  info.textContent = 'Quick training (50 steps)...';
+  const res = await api('/api/llm/novel/experiment', 'POST', {
+    block_design: design,
+    d_model: parseInt(document.getElementById('llm-dmodel').value) || 128,
+    n_heads: parseInt(document.getElementById('llm-nheads').value) || 4,
+    vocab_size: 256, n_layers: 2, max_len: 64,
+    text, train_steps: 50, learning_rate: 1e-3,
+  });
+  if (res.status === 'ok') {
+    info.innerHTML = `<span style="color:var(--success)">Trained!</span> ${res.total_params_M} params<br>` +
+      `Loss: ${res.initial_loss} -> <b>${res.final_loss}</b> (${res.loss_reduction > 0 ? '-' : '+'}${Math.abs(res.loss_reduction).toFixed(3)})<br>` +
+      `Speed: ${res.steps_per_second} steps/sec (${res.time_seconds}s total)<br>` +
+      `Steps: ${res.step_types.join(' -> ')}`;
+  } else {
+    info.innerHTML = `<span style="color:var(--danger)">${res.message}</span>`;
+  }
+}
+
+// ============================================================
+// FULL CUSTOM MODEL + LOSS + ARCH SEARCH
+// ============================================================
+async function buildModelFromCode() {
+  const code = document.getElementById('novel-model-code').value;
+  if (!code.trim()) { toast('Write model code first', 'error'); return; }
+  const info = document.getElementById('novel-model-info');
+  info.textContent = 'Building...';
+  const res = await api('/api/llm/novel/model-from-code', 'POST', {
+    code,
+    vocab_size: parseInt(document.getElementById('llm-vocab').value) || 32000,
+    d_model: parseInt(document.getElementById('llm-dmodel').value) || 256,
+  });
+  if (res.status === 'ok') {
+    info.innerHTML = `<span style="color:var(--success)">${res.message}</span>`;
+    toast(`${res.model_class}: ${res.parameters.total_M} params`, 'success');
+    document.getElementById('llm-layer-editor').classList.remove('hidden');
+    window._lastModelType = 'custom_code';
+  } else {
+    info.innerHTML = `<span style="color:var(--danger)">[${res.stage||'error'}] ${res.message}</span>`;
+    toast(res.message, 'error');
+  }
+}
+
+async function setCustomLoss() {
+  const mode = document.getElementById('novel-loss-mode').value;
+  const body = { mode };
+  if (mode === 'formula') {
+    body.formula = document.getElementById('novel-loss-formula').value;
+  } else {
+    body.code = document.getElementById('novel-loss-code').value;
+  }
+  const info = document.getElementById('novel-loss-info');
+  info.textContent = 'Validating...';
+  const res = await api('/api/llm/novel/custom-loss', 'POST', body);
+  if (res.status === 'ok') {
+    info.innerHTML = `<span style="color:var(--success)">${res.message}</span>`;
+    toast('Custom loss set', 'success');
+  } else {
+    info.innerHTML = `<span style="color:var(--danger)">${res.message}</span>`;
+  }
+}
+
+async function runArchSearch() {
+  const info = document.getElementById('novel-result');
+  let text = document.getElementById('llm-train-text')?.value || '';
+  if (text.length < 100) {
+    text = 'The quick brown fox jumps over the lazy dog. '.repeat(50) +
+      'Machine learning models process sequences of tokens. '.repeat(30) +
+      'Attention mechanisms allow models to focus on relevant parts. '.repeat(30);
+  }
+  info.innerHTML = '<span style="color:var(--accent)">Running architecture search across 10+ designs... (may take 30-60s)</span>';
+  const res = await api('/api/llm/novel/arch-search', 'POST', {
+    auto_search: true,
+    d_model: parseInt(document.getElementById('llm-dmodel').value) || 128,
+    n_heads: parseInt(document.getElementById('llm-nheads').value) || 4,
+    vocab_size: 256, n_layers: 2, train_steps: 30, text,
+    designs: selectedNovelTemplate ? { "your_design": selectedNovelTemplate.block_design } : {},
+  });
+  if (res.status === 'ok' && res.ranking) {
+    let html = `<b>Architecture Search Results</b> (${res.n_successful}/${res.n_designs} succeeded)<br>`;
+    html += `Best learning: <b style="color:var(--success)">${res.summary.best_loss_reduction}</b> | `;
+    html += `Most efficient: <b style="color:#fd9644">${res.summary.best_efficiency}</b> | `;
+    html += `Fastest: <b style="color:#45aaf2">${res.summary.fastest}</b><br><br>`;
+    html += '<table style="width:100%;font-size:8px;border-collapse:collapse">';
+    html += '<tr style="border-bottom:1px solid var(--border)"><th>#</th><th>Design</th><th>Loss Drop</th><th>Params</th><th>Speed</th><th>Efficiency</th></tr>';
+    res.ranking.forEach((r, i) => {
+      if (r.status !== 'ok') return;
+      const isBest = i === 0;
+      html += `<tr style="border-bottom:1px solid var(--border);${isBest?'color:var(--success);font-weight:600':''}">`;
+      html += `<td>${i+1}</td><td>${r.name}</td><td>${r.loss_reduction.toFixed(3)}</td>`;
+      html += `<td>${r.params_M}</td><td>${r.steps_per_sec}/s</td><td>${r.efficiency.toFixed(3)}</td></tr>`;
+    });
+    html += '</table>';
+    info.innerHTML = html;
+  } else {
+    info.innerHTML = `<span style="color:var(--danger)">${res.message || 'Search failed'}</span>`;
+  }
+}
+
+// ============================================================
+// DIFFUSION TRAINING
+// ============================================================
+async function trainDiffusionVAE() {
+  const info = document.getElementById('diff-info');
+  info.textContent = 'Training VAE...';
+  const res = await api('/api/diffusion/train-vae', 'POST', {
+    epochs: parseInt(document.getElementById('diff-epochs').value),
+    batch_size: parseInt(document.getElementById('diff-batch').value),
+    image_size: parseInt(document.getElementById('diff-img-size').value),
+    base_channels: parseInt(document.getElementById('diff-base-ch').value),
+    learning_rate: 1e-4,
+    kl_weight: 0.01,
+  });
+  if (res.status === 'started') {
+    info.innerHTML = `<span style="color:var(--success)">VAE training started: ${res.model_params_M} params</span>`;
+    toast(`VAE training started: ${res.model_params_M}`, 'success');
+  } else {
+    info.innerHTML = `<span style="color:var(--danger)">${res.message}</span>`;
+  }
+}
+
+async function trainDiffusion() {
+  const info = document.getElementById('diff-info');
+  info.textContent = 'Building & training UNet...';
+  const res = await api('/api/diffusion/train', 'POST', {
+    mode: 'image',
+    epochs: parseInt(document.getElementById('diff-epochs').value),
+    batch_size: parseInt(document.getElementById('diff-batch').value),
+    image_size: parseInt(document.getElementById('diff-img-size').value),
+    base_channels: parseInt(document.getElementById('diff-base-ch').value),
+    n_steps: parseInt(document.getElementById('diff-steps').value),
+    schedule: document.getElementById('diff-schedule').value,
+    use_vae: document.getElementById('diff-use-vae').checked,
+    learning_rate: 1e-4,
+  });
+  if (res.status === 'started') {
+    info.innerHTML = `<span style="color:var(--success)">Diffusion training: ${res.model_params_M} params, ${res.n_samples} samples</span>`;
+    toast(`Diffusion training started: ${res.model_params_M}`, 'success');
+  } else {
+    info.innerHTML = `<span style="color:var(--danger)">${res.message}</span>`;
+  }
+}
+
+async function generateDiffusion() {
+  const info = document.getElementById('diff-info');
+  info.textContent = 'Generating...';
+  const res = await api('/api/diffusion/generate', 'POST', {
+    n_images: 4,
+    n_steps: 50,
+    image_size: parseInt(document.getElementById('diff-img-size').value),
+  });
+  if (res.status === 'ok') {
+    info.innerHTML = `<span style="color:var(--success)">${res.message}</span>`;
+    toast(res.message, 'success');
+  } else {
+    info.innerHTML = `<span style="color:var(--danger)">${res.message}</span>`;
+  }
+}
+
+// ============================================================
 // ARCHITECTURE VISUALIZER
 // ============================================================
 let archFormulas = {};
@@ -8952,6 +10006,86 @@ function _inferOutputShape(node) {
 }
 
 // ============================================================
+// ============================================================
+// DASHBOARD
+// ============================================================
+let dashboardInterval = null;
+
+async function refreshDashboard() {
+  try {
+    // Fetch system resources
+    const sysRes = await fetch('/api/system/resources').then(r => r.json());
+    document.getElementById('dash-cpu').textContent = sysRes.cpu_percent + '%';
+    document.getElementById('dash-ram').textContent = sysRes.ram_used_gb + 'G';
+    document.getElementById('dash-cpu-val').textContent = sysRes.cpu_percent + '%';
+    document.getElementById('dash-cpu-bar').style.width = sysRes.cpu_percent + '%';
+    document.getElementById('dash-ram-val').textContent = sysRes.ram_percent + '%';
+    document.getElementById('dash-ram-bar').style.width = sysRes.ram_percent + '%';
+
+    if (sysRes.gpu_name) {
+      document.getElementById('dash-gpu').textContent = sysRes.gpu_name.replace(/NVIDIA |Apple /, '');
+      if (sysRes.gpu_mem_total_gb && sysRes.gpu_mem_used_gb != null) {
+        const gpuPct = Math.round((sysRes.gpu_mem_used_gb / sysRes.gpu_mem_total_gb) * 100);
+        document.getElementById('dash-gpu-val').textContent = gpuPct + '%';
+        document.getElementById('dash-gpu-bar').style.width = gpuPct + '%';
+      } else {
+        document.getElementById('dash-gpu-val').textContent = 'Active';
+        document.getElementById('dash-gpu-bar').style.width = '10%';
+      }
+    } else {
+      document.getElementById('dash-gpu').textContent = 'None';
+      document.getElementById('dash-gpu-val').textContent = 'N/A';
+      document.getElementById('dash-gpu-bar').style.width = '0%';
+    }
+  } catch (e) { /* ignore */ }
+
+  try {
+    // Fetch registry info for capability counts
+    const reg = await fetch('/api/registry').then(r => r.json());
+    document.getElementById('dash-layers-count').textContent = (reg.layers || []).length;
+    document.getElementById('dash-opts-count').textContent = (reg.optimizers || []).length;
+    document.getElementById('dash-datasets-count').textContent = (reg.datasets || []).length || '13';
+  } catch (e) { /* ignore */ }
+
+  try {
+    // Fetch experiments
+    const expRes = await fetch('/api/experiments').then(r => r.json());
+    const container = document.getElementById('dash-experiments');
+    const exps = expRes.experiments || [];
+    if (exps.length === 0) {
+      container.innerHTML = '<div class="dash-empty-state">No experiments yet. Train a model and save a run to track results here.</div>';
+    } else {
+      container.innerHTML = exps.slice(-5).reverse().map(e => {
+        const loss = e.best_val_loss != null ? 'Loss: ' + e.best_val_loss.toFixed(4) : '';
+        const acc = e.best_val_acc != null ? 'Acc: ' + (e.best_val_acc * 100).toFixed(1) + '%' : '';
+        const metric = acc || loss || '';
+        const params = e.total_params ? (e.total_params > 1e6 ? (e.total_params/1e6).toFixed(1)+'M' : (e.total_params/1e3).toFixed(1)+'K') + ' params' : '';
+        return '<div class="dash-exp-row" onclick="switchTab(\'experiments\')">' +
+          '<span class="dash-exp-name">' + e.name + '</span>' +
+          '<span class="dash-exp-meta">' + params + '</span>' +
+          '<span class="dash-exp-metric">' + metric + '</span>' +
+        '</div>';
+      }).join('');
+    }
+  } catch (e) { /* ignore */ }
+
+  // Auto-refresh while dashboard is visible
+  if (!dashboardInterval) {
+    dashboardInterval = setInterval(() => {
+      const dash = document.getElementById('dashboard-welcome');
+      if (dash && dash.style.display !== 'none') {
+        refreshDashboard();
+      } else {
+        clearInterval(dashboardInterval);
+        dashboardInterval = null;
+      }
+    }, 5000);
+  }
+}
+
+// Initial dashboard load
+setTimeout(refreshDashboard, 500);
+
 // INIT
 // ============================================================
 initCharts();
@@ -8962,6 +10096,7 @@ initUnsloth();
 initCollab();
 initLibraries();
 initLLMBuilder();
+initBlueprints();
 loadFormulas();
 
 // Keepalive ping

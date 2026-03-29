@@ -922,60 +922,805 @@ class GatedLinearRecurrence(nn.Module):
         return residual + self.drop(self.out_proj(y))
 
 
+# ---------------------------------------------------------------------------
+# CNN Backbone Blocks (ResNet, EfficientNet, ConvNeXt)
+# ---------------------------------------------------------------------------
+
+class ResNetBlock(nn.Module):
+    """Standard ResNet bottleneck block.
+
+    Architecture: Conv1x1→BN→ReLU → Conv3x3→BN→ReLU → Conv1x1→BN + Skip → ReLU
+    Used as vision backbone encoder for multimodal models.
+    """
+    def __init__(self, in_channels: int, mid_channels: int = None, out_channels: int = None,
+                 stride: int = 1):
+        super().__init__()
+        mid_channels = mid_channels or in_channels // 4
+        out_channels = out_channels or in_channels
+        self.conv1 = nn.Conv2d(in_channels, mid_channels, 1, bias=False)
+        self.bn1 = nn.BatchNorm2d(mid_channels)
+        self.conv2 = nn.Conv2d(mid_channels, mid_channels, 3, stride=stride, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(mid_channels)
+        self.conv3 = nn.Conv2d(mid_channels, out_channels, 1, bias=False)
+        self.bn3 = nn.BatchNorm2d(out_channels)
+        self.skip = nn.Identity() if (in_channels == out_channels and stride == 1) else nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, 1, stride=stride, bias=False),
+            nn.BatchNorm2d(out_channels),
+        )
+        self.act = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        identity = self.skip(x)
+        out = self.act(self.bn1(self.conv1(x)))
+        out = self.act(self.bn2(self.conv2(out)))
+        out = self.bn3(self.conv3(out))
+        return self.act(out + identity)
+
+
+class ConvNeXtBlock(nn.Module):
+    """ConvNeXt block — modernized ConvNet design.
+
+    Architecture: DWConv7x7 → LayerNorm → Linear → GELU → Linear + Skip
+    """
+    def __init__(self, channels: int, expand_ratio: int = 4):
+        super().__init__()
+        hidden = channels * expand_ratio
+        self.dwconv = nn.Conv2d(channels, channels, 7, padding=3, groups=channels)
+        self.norm = nn.LayerNorm(channels)
+        self.pwconv1 = nn.Linear(channels, hidden)
+        self.act = nn.GELU()
+        self.pwconv2 = nn.Linear(hidden, channels)
+        self.gamma = nn.Parameter(1e-6 * torch.ones(channels))
+
+    def forward(self, x):
+        identity = x
+        x = self.dwconv(x)
+        x = x.permute(0, 2, 3, 1)  # (B, C, H, W) -> (B, H, W, C)
+        x = self.norm(x)
+        x = self.pwconv1(x)
+        x = self.act(x)
+        x = self.pwconv2(x)
+        x = self.gamma * x
+        x = x.permute(0, 3, 1, 2)  # (B, H, W, C) -> (B, C, H, W)
+        return x + identity
+
+
+class MBConvBlock(nn.Module):
+    """MBConv (Mobile Inverted Bottleneck) — EfficientNet building block.
+
+    Architecture: Conv1x1(expand) → DWConv → SE → Conv1x1(project) + Skip
+    """
+    def __init__(self, in_channels: int, out_channels: int = None, expand_ratio: int = 4,
+                 kernel_size: int = 3, stride: int = 1, se_ratio: float = 0.25):
+        super().__init__()
+        out_channels = out_channels or in_channels
+        hidden = in_channels * expand_ratio
+        self.use_skip = (stride == 1 and in_channels == out_channels)
+
+        self.expand = nn.Sequential(
+            nn.Conv2d(in_channels, hidden, 1, bias=False),
+            nn.BatchNorm2d(hidden),
+            nn.SiLU(inplace=True),
+        ) if expand_ratio != 1 else nn.Identity()
+
+        self.depthwise = nn.Sequential(
+            nn.Conv2d(hidden, hidden, kernel_size, stride=stride,
+                      padding=kernel_size // 2, groups=hidden, bias=False),
+            nn.BatchNorm2d(hidden),
+            nn.SiLU(inplace=True),
+        )
+
+        # Squeeze-and-Excitation
+        se_channels = max(1, int(in_channels * se_ratio))
+        self.se = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(hidden, se_channels, 1),
+            nn.SiLU(inplace=True),
+            nn.Conv2d(se_channels, hidden, 1),
+            nn.Sigmoid(),
+        )
+
+        self.project = nn.Sequential(
+            nn.Conv2d(hidden, out_channels, 1, bias=False),
+            nn.BatchNorm2d(out_channels),
+        )
+
+    def forward(self, x):
+        identity = x
+        out = self.expand(x)
+        out = self.depthwise(out)
+        out = out * self.se(out)
+        out = self.project(out)
+        if self.use_skip:
+            out = out + identity
+        return out
+
+
+# ---------------------------------------------------------------------------
+# Vision Encoder (stackable backbone for multimodal models)
+# ---------------------------------------------------------------------------
+
+class VisionEncoder(nn.Module):
+    """Configurable vision encoder backbone.
+
+    Stacks conv blocks to encode images into feature sequences.
+    Input: (B, C, H, W) → Output: (B, num_features, d_model)
+
+    backbone: "resnet", "convnext", "mbconv", "simple"
+    """
+    def __init__(self, d_model: int = 512, in_channels: int = 3,
+                 backbone: str = "simple", n_stages: int = 4,
+                 base_channels: int = 64):
+        super().__init__()
+        self.d_model = d_model
+
+        layers = []
+        ch_in = in_channels
+        ch = base_channels
+
+        for i in range(n_stages):
+            ch_out = ch * (2 ** i)
+            if backbone == "resnet":
+                layers.append(ResNetBlock(ch_in if i == 0 else ch * (2 ** (i-1)),
+                                         out_channels=ch_out, stride=2 if i > 0 else 1))
+                if i == 0:
+                    layers.insert(0, nn.Sequential(
+                        nn.Conv2d(in_channels, ch_in if i == 0 else ch, 7, stride=2, padding=3, bias=False),
+                        nn.BatchNorm2d(ch_in if i == 0 else ch),
+                        nn.ReLU(inplace=True),
+                        nn.MaxPool2d(3, stride=2, padding=1),
+                    ))
+                    ch_in = ch
+            elif backbone == "convnext":
+                if i == 0:
+                    layers.append(nn.Sequential(
+                        nn.Conv2d(in_channels, ch_out, 4, stride=4),
+                        nn.GroupNorm(1, ch_out),
+                    ))
+                else:
+                    layers.append(nn.Sequential(
+                        nn.GroupNorm(1, ch * (2 ** (i-1))),
+                        nn.Conv2d(ch * (2 ** (i-1)), ch_out, 2, stride=2),
+                    ))
+                layers.append(ConvNeXtBlock(ch_out))
+            elif backbone == "mbconv":
+                if i == 0:
+                    layers.append(nn.Sequential(
+                        nn.Conv2d(in_channels, ch_out, 3, stride=2, padding=1, bias=False),
+                        nn.BatchNorm2d(ch_out),
+                        nn.SiLU(inplace=True),
+                    ))
+                else:
+                    layers.append(MBConvBlock(ch * (2 ** (i-1)), ch_out, stride=2))
+            else:  # simple
+                layers.append(nn.Sequential(
+                    nn.Conv2d(ch_in if i == 0 else ch * (2 ** (i-1)), ch_out, 3, stride=2, padding=1),
+                    nn.BatchNorm2d(ch_out),
+                    nn.GELU(),
+                ))
+            ch_in = ch_out
+
+        self.backbone = nn.Sequential(*layers)
+        self.proj = nn.Linear(ch * (2 ** (n_stages - 1)), d_model)
+        self.norm = nn.LayerNorm(d_model)
+
+    def forward(self, x):
+        # x: (B, C, H, W)
+        features = self.backbone(x)  # (B, C', H', W')
+        B, C, H, W = features.shape
+        features = features.flatten(2).transpose(1, 2)  # (B, H'*W', C')
+        return self.norm(self.proj(features))  # (B, N, d_model)
+
+
+# ---------------------------------------------------------------------------
+# Diffusion Components (Full)
+# ---------------------------------------------------------------------------
+
+class DiffusionTimestepBlock(nn.Module):
+    """ResNet block conditioned on diffusion timestep.
+
+    Used in UNet diffusion models. Injects timestep embedding via AdaGN.
+    """
+    def __init__(self, channels: int, time_dim: int, out_channels: int = None):
+        super().__init__()
+        out_channels = out_channels or channels
+        self.norm1 = nn.GroupNorm(32, channels)
+        self.conv1 = nn.Conv2d(channels, out_channels, 3, padding=1)
+        self.time_proj = nn.Linear(time_dim, out_channels * 2)
+        self.norm2 = nn.GroupNorm(32, out_channels)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, padding=1)
+        self.skip = nn.Conv2d(channels, out_channels, 1) if channels != out_channels else nn.Identity()
+        self.act = nn.SiLU()
+
+    def forward(self, x, t_emb):
+        h = self.act(self.norm1(x))
+        h = self.conv1(h)
+        # Inject timestep: scale and shift
+        t = self.time_proj(self.act(t_emb))
+        scale, shift = t.unsqueeze(-1).unsqueeze(-1).chunk(2, dim=1)
+        h = self.norm2(h) * (1 + scale) + shift
+        h = self.act(h)
+        h = self.conv2(h)
+        return h + self.skip(x)
+
+
+class SpatialAttentionBlock(nn.Module):
+    """Self-attention over spatial dimensions for diffusion UNet.
+
+    Input: (B, C, H, W) → reshape to (B, H*W, C) → attention → reshape back
+    """
+    def __init__(self, channels: int, n_heads: int = 8):
+        super().__init__()
+        self.norm = nn.GroupNorm(32, channels)
+        self.attn = nn.MultiheadAttention(channels, n_heads, batch_first=True)
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        h = self.norm(x)
+        h = h.flatten(2).transpose(1, 2)  # (B, H*W, C)
+        h, _ = self.attn(h, h, h)
+        h = h.transpose(1, 2).reshape(B, C, H, W)
+        return x + h
+
+
+class CrossAttentionBlock(nn.Module):
+    """Cross-attention for conditioning (text→image in diffusion models).
+
+    Query from image features, Key/Value from text embeddings.
+    """
+    def __init__(self, channels: int, context_dim: int = 512, n_heads: int = 8):
+        super().__init__()
+        self.norm = nn.GroupNorm(32, channels)
+        self.norm_ctx = nn.LayerNorm(context_dim)
+        self.to_q = nn.Linear(channels, channels)
+        self.to_k = nn.Linear(context_dim, channels)
+        self.to_v = nn.Linear(context_dim, channels)
+        self.to_out = nn.Linear(channels, channels)
+        self.n_heads = n_heads
+        self.head_dim = channels // n_heads
+
+    def forward(self, x, context):
+        B, C, H, W = x.shape
+        h = self.norm(x).flatten(2).transpose(1, 2)  # (B, HW, C)
+        ctx = self.norm_ctx(context)  # (B, L, context_dim)
+
+        q = self.to_q(h).reshape(B, -1, self.n_heads, self.head_dim).transpose(1, 2)
+        k = self.to_k(ctx).reshape(B, -1, self.n_heads, self.head_dim).transpose(1, 2)
+        v = self.to_v(ctx).reshape(B, -1, self.n_heads, self.head_dim).transpose(1, 2)
+
+        out = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        out = out.transpose(1, 2).reshape(B, H * W, C)
+        out = self.to_out(out).transpose(1, 2).reshape(B, C, H, W)
+        return x + out
+
+
+class DiffusionUNet(nn.Module):
+    """Complete UNet for diffusion models (text-to-image / text-to-video).
+
+    Architecture:
+      Encoder: [DownBlock with ResBlocks + Attention] x N
+      Middle: ResBlock + Attention + ResBlock
+      Decoder: [UpBlock with ResBlocks + Attention + Skip-connections] x N
+
+    Supports text conditioning via cross-attention.
+    """
+    def __init__(self, in_channels: int = 4, out_channels: int = 4,
+                 base_channels: int = 128, channel_mults: tuple = (1, 2, 4, 8),
+                 n_res_blocks: int = 2, attn_resolutions: tuple = (2, 3),
+                 time_dim: int = 512, context_dim: int = 512,
+                 n_heads: int = 8):
+        super().__init__()
+        self.time_dim = time_dim
+
+        # Timestep embedding
+        self.time_embed = nn.Sequential(
+            nn.Linear(base_channels, time_dim),
+            nn.SiLU(),
+            nn.Linear(time_dim, time_dim),
+        )
+
+        # Input conv
+        self.input_conv = nn.Conv2d(in_channels, base_channels, 3, padding=1)
+
+        # Encoder
+        self.encoder_blocks = nn.ModuleList()
+        self.downsamplers = nn.ModuleList()
+        ch = base_channels
+        encoder_channels = [ch]
+
+        for level, mult in enumerate(channel_mults):
+            ch_out = base_channels * mult
+            for _ in range(n_res_blocks):
+                block = nn.ModuleList([DiffusionTimestepBlock(ch, time_dim, ch_out)])
+                if level in attn_resolutions:
+                    block.append(SpatialAttentionBlock(ch_out, n_heads))
+                    block.append(CrossAttentionBlock(ch_out, context_dim, n_heads))
+                self.encoder_blocks.append(block)
+                ch = ch_out
+                encoder_channels.append(ch)
+            if level < len(channel_mults) - 1:
+                self.downsamplers.append(nn.Conv2d(ch, ch, 3, stride=2, padding=1))
+                encoder_channels.append(ch)
+
+        # Middle
+        self.mid_block1 = DiffusionTimestepBlock(ch, time_dim)
+        self.mid_attn = SpatialAttentionBlock(ch, n_heads)
+        self.mid_cross = CrossAttentionBlock(ch, context_dim, n_heads)
+        self.mid_block2 = DiffusionTimestepBlock(ch, time_dim)
+
+        # Decoder
+        self.decoder_blocks = nn.ModuleList()
+        self.upsamplers = nn.ModuleList()
+
+        for level in reversed(range(len(channel_mults))):
+            ch_out = base_channels * channel_mults[level]
+            for i in range(n_res_blocks + 1):
+                skip_ch = encoder_channels.pop()
+                block = nn.ModuleList([DiffusionTimestepBlock(ch + skip_ch, time_dim, ch_out)])
+                if level in attn_resolutions:
+                    block.append(SpatialAttentionBlock(ch_out, n_heads))
+                    block.append(CrossAttentionBlock(ch_out, context_dim, n_heads))
+                self.decoder_blocks.append(block)
+                ch = ch_out
+            if level > 0:
+                self.upsamplers.append(nn.Sequential(
+                    nn.Upsample(scale_factor=2, mode='nearest'),
+                    nn.Conv2d(ch, ch, 3, padding=1),
+                ))
+
+        # Output
+        self.out_norm = nn.GroupNorm(32, ch)
+        self.out_conv = nn.Conv2d(ch, out_channels, 3, padding=1)
+
+    def _timestep_embedding(self, t, dim):
+        half = dim // 2
+        emb = torch.exp(-torch.arange(half, device=t.device).float() * (math.log(10000.0) / half))
+        emb = t.unsqueeze(1).float() * emb.unsqueeze(0)
+        return torch.cat([torch.sin(emb), torch.cos(emb)], dim=-1)
+
+    def forward(self, x, timesteps, context=None):
+        t_emb = self._timestep_embedding(timesteps, self.time_dim // 4)
+        t_emb = self.time_embed(t_emb)
+
+        if context is None:
+            context = torch.zeros(x.shape[0], 1, 512, device=x.device)
+
+        h = self.input_conv(x)
+        skips = [h]
+
+        # Encoder
+        ds_idx = 0
+        for block in self.encoder_blocks:
+            h = block[0](h, t_emb)
+            for layer in block[1:]:
+                if isinstance(layer, CrossAttentionBlock):
+                    h = layer(h, context)
+                else:
+                    h = layer(h)
+            skips.append(h)
+            if ds_idx < len(self.downsamplers) and len(skips) % 3 == 0:
+                h = self.downsamplers[ds_idx](h)
+                skips.append(h)
+                ds_idx += 1
+
+        # Middle
+        h = self.mid_block1(h, t_emb)
+        h = self.mid_attn(h)
+        h = self.mid_cross(h, context)
+        h = self.mid_block2(h, t_emb)
+
+        # Decoder
+        us_idx = 0
+        for block in self.decoder_blocks:
+            skip = skips.pop() if skips else torch.zeros_like(h)
+            if h.shape != skip.shape:
+                skip = torch.nn.functional.interpolate(skip, size=h.shape[2:])
+                if skip.shape[1] != h.shape[1]:
+                    skip = skip[:, :h.shape[1]] if skip.shape[1] > h.shape[1] else torch.nn.functional.pad(skip, (0, 0, 0, 0, 0, h.shape[1] - skip.shape[1]))
+            h = torch.cat([h, skip], dim=1)
+            h = block[0](h, t_emb)
+            for layer in block[1:]:
+                if isinstance(layer, CrossAttentionBlock):
+                    h = layer(h, context)
+                else:
+                    h = layer(h)
+            if us_idx < len(self.upsamplers):
+                h = self.upsamplers[us_idx](h)
+                us_idx += 1
+
+        return self.out_conv(torch.nn.functional.silu(self.out_norm(h)))
+
+
+class VAE(nn.Module):
+    """Variational Autoencoder for latent diffusion.
+
+    Encodes images to latent space, decodes latent back to images.
+    Used as the first stage in latent diffusion models (Stable Diffusion, VeO3).
+    """
+    def __init__(self, in_channels: int = 3, latent_channels: int = 4,
+                 base_channels: int = 64, channel_mults: tuple = (1, 2, 4)):
+        super().__init__()
+
+        # Encoder
+        enc_layers = [nn.Conv2d(in_channels, base_channels, 3, padding=1)]
+        ch = base_channels
+        for mult in channel_mults:
+            ch_out = base_channels * mult
+            enc_layers.extend([
+                ResConvBlock(ch, ch_out),
+                ResConvBlock(ch_out, ch_out),
+                nn.Conv2d(ch_out, ch_out, 3, stride=2, padding=1),
+            ])
+            ch = ch_out
+        enc_layers.extend([
+            ResConvBlock(ch, ch),
+            nn.GroupNorm(32, ch),
+            nn.SiLU(),
+            nn.Conv2d(ch, latent_channels * 2, 1),  # mu + log_var
+        ])
+        self.encoder = nn.Sequential(*enc_layers)
+
+        # Decoder
+        dec_layers = [nn.Conv2d(latent_channels, ch, 1)]
+        for mult in reversed(channel_mults):
+            ch_out = base_channels * mult
+            dec_layers.extend([
+                ResConvBlock(ch, ch_out),
+                ResConvBlock(ch_out, ch_out),
+                nn.Upsample(scale_factor=2, mode='nearest'),
+                nn.Conv2d(ch_out, ch_out, 3, padding=1),
+            ])
+            ch = ch_out
+        dec_layers.extend([
+            nn.GroupNorm(32, ch),
+            nn.SiLU(),
+            nn.Conv2d(ch, in_channels, 3, padding=1),
+        ])
+        self.decoder = nn.Sequential(*dec_layers)
+
+    def encode(self, x):
+        h = self.encoder(x)
+        mu, log_var = h.chunk(2, dim=1)
+        return mu, log_var
+
+    def reparameterize(self, mu, log_var):
+        std = torch.exp(0.5 * log_var)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+
+    def decode(self, z):
+        return self.decoder(z)
+
+    def forward(self, x):
+        mu, log_var = self.encode(x)
+        z = self.reparameterize(mu, log_var)
+        recon = self.decode(z)
+        # KL divergence loss
+        kl_loss = -0.5 * torch.mean(1 + log_var - mu.pow(2) - log_var.exp())
+        return {"reconstruction": recon, "mu": mu, "log_var": log_var, "kl_loss": kl_loss, "latent": z}
+
+
+class NoiseScheduler:
+    """DDPM / DDIM noise scheduler for diffusion training.
+
+    Manages the forward (noise addition) and reverse (denoising) process.
+    """
+    def __init__(self, n_steps: int = 1000, beta_start: float = 0.0001,
+                 beta_end: float = 0.02, schedule: str = "linear"):
+        if schedule == "linear":
+            self.betas = torch.linspace(beta_start, beta_end, n_steps)
+        elif schedule == "cosine":
+            steps = torch.linspace(0, n_steps, n_steps + 1)
+            alpha_bar = torch.cos(((steps / n_steps) + 0.008) / 1.008 * math.pi / 2) ** 2
+            alpha_bar = alpha_bar / alpha_bar[0]
+            betas = 1 - (alpha_bar[1:] / alpha_bar[:-1])
+            self.betas = torch.clamp(betas, 0.0001, 0.999)
+        else:
+            self.betas = torch.linspace(beta_start, beta_end, n_steps)
+
+        self.alphas = 1.0 - self.betas
+        self.alpha_cumprod = torch.cumprod(self.alphas, dim=0)
+        self.sqrt_alpha_cumprod = torch.sqrt(self.alpha_cumprod)
+        self.sqrt_one_minus_alpha_cumprod = torch.sqrt(1.0 - self.alpha_cumprod)
+        self.n_steps = n_steps
+
+    def add_noise(self, x, noise, timesteps):
+        """Forward process: add noise to clean data."""
+        sqrt_alpha = self.sqrt_alpha_cumprod[timesteps].view(-1, *([1] * (x.dim() - 1))).to(x.device)
+        sqrt_one_minus = self.sqrt_one_minus_alpha_cumprod[timesteps].view(-1, *([1] * (x.dim() - 1))).to(x.device)
+        return sqrt_alpha * x + sqrt_one_minus * noise
+
+    def sample_timesteps(self, batch_size, device):
+        return torch.randint(0, self.n_steps, (batch_size,), device=device)
+
+
+# ---------------------------------------------------------------------------
+# Video Generation Components
+# ---------------------------------------------------------------------------
+
+class TemporalAttention(nn.Module):
+    """Attention across the temporal dimension for video models.
+
+    Input: (B, T, C, H, W) → attention over T → Output: (B, T, C, H, W)
+    Used in video diffusion models like VeO3, AnimateDiff.
+    """
+    def __init__(self, channels: int, n_heads: int = 8, n_frames: int = 16):
+        super().__init__()
+        self.norm = nn.GroupNorm(32, channels)
+        self.attn = nn.MultiheadAttention(channels, n_heads, batch_first=True)
+        self.pos_emb = nn.Parameter(torch.randn(1, n_frames, channels) * 0.02)
+        self.n_frames = n_frames
+
+    def forward(self, x):
+        # x: (B*T, C, H, W) or (B, T, C, H, W)
+        if x.dim() == 5:
+            B, T, C, H, W = x.shape
+            reshape_5d = True
+        else:
+            BT, C, H, W = x.shape
+            T = min(self.n_frames, BT)
+            B = BT // T
+            reshape_5d = False
+
+        # Reshape to (B*H*W, T, C) for temporal attention
+        if reshape_5d:
+            h = x.permute(0, 3, 4, 1, 2).reshape(B * H * W, T, C)
+        else:
+            h = x.reshape(B, T, C, H, W).permute(0, 3, 4, 1, 2).reshape(B * H * W, T, C)
+
+        h = h + self.pos_emb[:, :T]
+        out, _ = self.attn(h, h, h)
+
+        if reshape_5d:
+            return out.reshape(B, H, W, T, C).permute(0, 3, 4, 1, 2)
+        else:
+            return out.reshape(B, H, W, T, C).permute(0, 3, 4, 1, 2).reshape(BT, C, H, W)
+
+
+class TemporalConv3d(nn.Module):
+    """Temporal convolution for video — convolves along time dimension only.
+
+    Input: (B, C, T, H, W) → Output: (B, C, T, H, W)
+    """
+    def __init__(self, channels: int, kernel_size: int = 3):
+        super().__init__()
+        self.conv = nn.Conv3d(channels, channels, kernel_size=(kernel_size, 1, 1),
+                              padding=(kernel_size // 2, 0, 0))
+        self.norm = nn.GroupNorm(32, channels)
+        self.act = nn.SiLU()
+
+    def forward(self, x):
+        return self.act(self.norm(self.conv(x))) + x
+
+
+class VideoVAE(nn.Module):
+    """3D VAE for video — encodes video frames to spatial-temporal latent space.
+
+    Input: (B, C, T, H, W) → Output latent: (B, latent_ch, T', H', W')
+    Used in VeO3, Sora-style video generation.
+    """
+    def __init__(self, in_channels: int = 3, latent_channels: int = 4,
+                 base_channels: int = 64, temporal_downsample: bool = True):
+        super().__init__()
+        t_stride = 2 if temporal_downsample else 1
+
+        self.encoder = nn.Sequential(
+            nn.Conv3d(in_channels, base_channels, 3, padding=1),
+            nn.SiLU(),
+            nn.Conv3d(base_channels, base_channels * 2, (t_stride, 2, 2),
+                      stride=(t_stride, 2, 2), padding=(0, 0, 0)),
+            nn.SiLU(),
+            nn.Conv3d(base_channels * 2, base_channels * 4, (1, 2, 2),
+                      stride=(1, 2, 2), padding=(0, 0, 0)),
+            nn.SiLU(),
+            nn.Conv3d(base_channels * 4, latent_channels * 2, 1),
+        )
+
+        self.decoder = nn.Sequential(
+            nn.Conv3d(latent_channels, base_channels * 4, 1),
+            nn.SiLU(),
+            nn.ConvTranspose3d(base_channels * 4, base_channels * 2, (1, 2, 2),
+                               stride=(1, 2, 2)),
+            nn.SiLU(),
+            nn.ConvTranspose3d(base_channels * 2, base_channels, (t_stride, 2, 2),
+                               stride=(t_stride, 2, 2)),
+            nn.SiLU(),
+            nn.Conv3d(base_channels, in_channels, 3, padding=1),
+        )
+
+    def encode(self, x):
+        h = self.encoder(x)
+        mu, log_var = h.chunk(2, dim=1)
+        return mu, log_var
+
+    def decode(self, z):
+        return self.decoder(z)
+
+    def forward(self, x):
+        mu, log_var = self.encode(x)
+        std = torch.exp(0.5 * log_var)
+        z = mu + std * torch.randn_like(std)
+        recon = self.decode(z)
+        kl_loss = -0.5 * torch.mean(1 + log_var - mu.pow(2) - log_var.exp())
+        return {"reconstruction": recon, "latent": z, "kl_loss": kl_loss}
+
+
+# ---------------------------------------------------------------------------
+# Perceiver Resampler (for flexible multimodal fusion)
+# ---------------------------------------------------------------------------
+
+class PerceiverResampler(nn.Module):
+    """Perceiver-style resampler for multimodal models.
+
+    Maps variable-length input (image patches, audio frames, video tokens)
+    to a fixed number of latent tokens via cross-attention.
+    Used in Flamingo, Gemini, and other multimodal models.
+
+    Input: (B, N_input, d_input) → Output: (B, n_latents, d_model)
+    """
+    def __init__(self, d_input: int, d_model: int = 512, n_latents: int = 64,
+                 n_heads: int = 8, n_layers: int = 2):
+        super().__init__()
+        self.latents = nn.Parameter(torch.randn(1, n_latents, d_model) * 0.02)
+        self.input_proj = nn.Linear(d_input, d_model) if d_input != d_model else nn.Identity()
+
+        self.layers = nn.ModuleList()
+        for _ in range(n_layers):
+            self.layers.append(nn.ModuleDict({
+                "cross_attn": nn.MultiheadAttention(d_model, n_heads, batch_first=True),
+                "cross_norm": nn.LayerNorm(d_model),
+                "ffn": nn.Sequential(
+                    nn.Linear(d_model, d_model * 4),
+                    nn.GELU(),
+                    nn.Linear(d_model * 4, d_model),
+                ),
+                "ffn_norm": nn.LayerNorm(d_model),
+            }))
+
+    def forward(self, x):
+        x = self.input_proj(x)
+        latents = self.latents.expand(x.shape[0], -1, -1)
+
+        for layer in self.layers:
+            # Cross-attention: latents attend to input
+            normed = layer["cross_norm"](latents)
+            attn_out, _ = layer["cross_attn"](normed, x, x)
+            latents = latents + attn_out
+            # FFN
+            latents = latents + layer["ffn"](layer["ffn_norm"](latents))
+
+        return latents
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Distillation Module
+# ---------------------------------------------------------------------------
+
+class DistillationWrapper(nn.Module):
+    """Wraps a student model for knowledge distillation from a teacher.
+
+    Combines hard label loss + soft KL-divergence loss from teacher logits.
+    """
+    def __init__(self, student: nn.Module, teacher: nn.Module = None,
+                 temperature: float = 4.0, alpha: float = 0.5):
+        super().__init__()
+        self.student = student
+        self.teacher = teacher
+        self.temperature = temperature
+        self.alpha = alpha  # weight for distillation loss vs hard loss
+        if teacher is not None:
+            for p in teacher.parameters():
+                p.requires_grad = False
+
+    def forward(self, input_ids, labels=None):
+        student_out = self.student(input_ids, labels=labels)
+
+        if self.teacher is not None and self.training and labels is not None:
+            with torch.no_grad():
+                teacher_out = self.teacher(input_ids)
+
+            # Soft distillation loss
+            T = self.temperature
+            student_logits = student_out["logits"] / T
+            teacher_logits = teacher_out["logits"] / T
+
+            soft_loss = torch.nn.functional.kl_div(
+                torch.nn.functional.log_softmax(student_logits, dim=-1),
+                torch.nn.functional.softmax(teacher_logits, dim=-1),
+                reduction="batchmean",
+            ) * (T * T)
+
+            hard_loss = student_out.get("loss", torch.tensor(0.0))
+            if hard_loss is not None:
+                student_out["loss"] = self.alpha * soft_loss + (1 - self.alpha) * hard_loss
+            else:
+                student_out["loss"] = soft_loss
+            student_out["distill_loss"] = soft_loss
+
+        return student_out
+
+
 # Register all custom layers
 from state_graph.core.registry import Registry
 
-# Original custom layers
-Registry.register_layer("ResidualBlock", ResidualBlock)
-Registry.register_layer("SqueezeExcite", SqueezeExcite)
-Registry.register_layer("GatedLinearUnit", GatedLinearUnit)
-Registry.register_layer("SwishLinear", SwishLinear)
-Registry.register_layer("TransformerBlock", TransformerBlock)
-Registry.register_layer("PositionalEncoding", PositionalEncoding)
-Registry.register_layer("TokenEmbedding", TokenEmbedding)
-Registry.register_layer("SequencePool", SequencePool)
+# Transformer / Attention
+Registry.register_layer("TransformerBlock", TransformerBlock, category="Transformer")
+Registry.register_layer("PositionalEncoding", PositionalEncoding, category="Transformer")
+Registry.register_layer("TokenEmbedding", TokenEmbedding, category="Transformer")
+Registry.register_layer("SequencePool", SequencePool, category="Transformer")
+
+# Building Blocks
+Registry.register_layer("ResidualBlock", ResidualBlock, category="Building Blocks")
+Registry.register_layer("SqueezeExcite", SqueezeExcite, category="Building Blocks")
+Registry.register_layer("GatedLinearUnit", GatedLinearUnit, category="Building Blocks")
+Registry.register_layer("SwishLinear", SwishLinear, category="Building Blocks")
+Registry.register_layer("Reshape", Reshape, category="Building Blocks")
+Registry.register_layer("GlobalAvgPool", GlobalAvgPool, category="Building Blocks")
 
 # Vision
-Registry.register_layer("PatchEmbed", PatchEmbed)
-Registry.register_layer("DepthwiseSeparableConv", DepthwiseSeparableConv)
-Registry.register_layer("ChannelAttention", ChannelAttention)
-Registry.register_layer("UpsampleBlock", UpsampleBlock)
-Registry.register_layer("GlobalAvgPool", GlobalAvgPool)
-Registry.register_layer("Reshape", Reshape)
-Registry.register_layer("ResConvBlock", ResConvBlock)
-Registry.register_layer("DownBlock", DownBlock)
-Registry.register_layer("UpBlock", UpBlock)
+Registry.register_layer("PatchEmbed", PatchEmbed, category="Vision")
+Registry.register_layer("DepthwiseSeparableConv", DepthwiseSeparableConv, category="Vision")
+Registry.register_layer("ChannelAttention", ChannelAttention, category="Vision")
+Registry.register_layer("UpsampleBlock", UpsampleBlock, category="Vision")
+Registry.register_layer("ResConvBlock", ResConvBlock, category="Vision")
+Registry.register_layer("DownBlock", DownBlock, category="Vision")
+Registry.register_layer("UpBlock", UpBlock, category="Vision")
 
 # Audio
-Registry.register_layer("MelSpectrogram", MelSpectrogram)
-Registry.register_layer("AudioConvBlock", AudioConvBlock)
-Registry.register_layer("Transpose", Transpose)
+Registry.register_layer("MelSpectrogram", MelSpectrogram, category="Audio")
+Registry.register_layer("AudioConvBlock", AudioConvBlock, category="Audio")
+Registry.register_layer("Transpose", Transpose, category="Audio")
 
 # Video
-Registry.register_layer("Conv3dBlock", Conv3dBlock)
-Registry.register_layer("TemporalPool", TemporalPool)
+Registry.register_layer("Conv3dBlock", Conv3dBlock, category="Video")
+Registry.register_layer("TemporalPool", TemporalPool, category="Video")
 
 # Diffusion / Generative
-Registry.register_layer("SinusoidalTimestepEmbed", SinusoidalTimestepEmbed)
-Registry.register_layer("ConditionalBatchNorm2d", ConditionalBatchNorm2d)
+Registry.register_layer("SinusoidalTimestepEmbed", SinusoidalTimestepEmbed, category="Diffusion")
+Registry.register_layer("ConditionalBatchNorm2d", ConditionalBatchNorm2d, category="Diffusion")
 
 # State-Space Models (Mamba / S4)
-Registry.register_layer("SelectiveScan", SelectiveScan)
-Registry.register_layer("MambaBlock", MambaBlock)
+Registry.register_layer("SelectiveScan", SelectiveScan, category="SSM / Alternative")
+Registry.register_layer("MambaBlock", MambaBlock, category="SSM / Alternative")
 
 # RWKV
-Registry.register_layer("RWKVBlock", RWKVBlock)
+Registry.register_layer("RWKVBlock", RWKVBlock, category="SSM / Alternative")
 
 # RetNet
-Registry.register_layer("RetentionLayer", RetentionLayer)
-Registry.register_layer("RetNetBlock", RetNetBlock)
+Registry.register_layer("RetentionLayer", RetentionLayer, category="SSM / Alternative")
+Registry.register_layer("RetNetBlock", RetNetBlock, category="SSM / Alternative")
 
 # Hyena
-Registry.register_layer("HyenaOperator", HyenaOperator)
-Registry.register_layer("HyenaBlock", HyenaBlock)
+Registry.register_layer("HyenaOperator", HyenaOperator, category="SSM / Alternative")
+Registry.register_layer("HyenaBlock", HyenaBlock, category="SSM / Alternative")
 
 # xLSTM
-Registry.register_layer("XLSTM", XLSTM)
+Registry.register_layer("XLSTM", XLSTM, category="SSM / Alternative")
 
 # Griffin / Hawk
-Registry.register_layer("GatedLinearRecurrence", GatedLinearRecurrence)
+Registry.register_layer("GatedLinearRecurrence", GatedLinearRecurrence, category="SSM / Alternative")
+
+# CNN Backbones
+Registry.register_layer("ResNetBlock", ResNetBlock, category="Vision")
+Registry.register_layer("ConvNeXtBlock", ConvNeXtBlock, category="Vision")
+Registry.register_layer("MBConvBlock", MBConvBlock, category="Vision")
+Registry.register_layer("VisionEncoder", VisionEncoder, category="Vision")
+
+# Diffusion (Full)
+Registry.register_layer("DiffusionTimestepBlock", DiffusionTimestepBlock, category="Diffusion")
+Registry.register_layer("SpatialAttentionBlock", SpatialAttentionBlock, category="Diffusion")
+Registry.register_layer("CrossAttentionBlock", CrossAttentionBlock, category="Diffusion")
+Registry.register_layer("DiffusionUNet", DiffusionUNet, category="Diffusion")
+Registry.register_layer("VAE", VAE, category="Diffusion")
+Registry.register_layer("NoiseScheduler", NoiseScheduler, category="Diffusion")
+
+# Video Generation
+Registry.register_layer("TemporalAttention", TemporalAttention, category="Video")
+Registry.register_layer("TemporalConv3d", TemporalConv3d, category="Video")
+Registry.register_layer("VideoVAE", VideoVAE, category="Video")
+
+# Multimodal
+Registry.register_layer("PerceiverResampler", PerceiverResampler, category="Multimodal")
+
+# Knowledge Distillation
+Registry.register_layer("DistillationWrapper", DistillationWrapper, category="Training")

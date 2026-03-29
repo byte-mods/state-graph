@@ -1339,3 +1339,743 @@ After training completes:
 <p align="center">
   Built for researchers who want to focus on math and architecture, not boilerplate code.
 </p>
+
+---
+
+## Tutorial 2: LLM Builder — Build & Train Language Models from Scratch
+
+The **LLM Builder** lets you create any language model architecture from scratch — GPT-2, Llama, Claude-style, Mixtral MoE, Mamba, or entirely novel designs. No pretrained weights needed.
+
+---
+
+### 2.1 Using Blueprints (Fastest Way)
+
+Blueprints are complete architecture configurations. Pick one, choose a scale, and build.
+
+**Example: Build a Llama-style LLM**
+
+```
+UI: LLM Builder → Model Blueprints → Select "Llama (from scratch)"
+     → Scale: "small" → Click "Build This Model"
+```
+
+```bash
+# API equivalent
+curl -X POST http://localhost:8765/api/llm/blueprint/build \
+  -H "Content-Type: application/json" \
+  -d '{
+    "blueprint": "llama_scratch",
+    "scale": "small"
+  }'
+
+# Response: {status: "ok", parameters: {total_M: "25.2M"}, ...}
+```
+
+**Available blueprints (18 total):**
+
+| Blueprint | Category | What It Builds |
+|-----------|----------|---------------|
+| `gpt2_scratch` | Text LLM | GPT-2 with LayerNorm + Standard FFN |
+| `llama_scratch` | Text LLM | Llama with RMSNorm + SwiGLU + GQA + RoPE |
+| `claude_scratch` | Text LLM | Claude-style with extended context RoPE (base=500K) |
+| `mistral_scratch` | Text LLM | Mistral with Sliding Window Attention |
+| `mixtral_scratch` | Text LLM | Mixtral MoE (8 experts, top-2 routing) |
+| `deepseek_scratch` | Text LLM | DeepSeek (dense early layers + MoE deep layers) |
+| `t5_scratch` | Enc-Dec | T5 encoder-decoder with cross-attention |
+| `mamba_scratch` | Alternative | Mamba SSM — O(n) linear-time, no attention |
+| `jamba_scratch` | Alternative | Jamba hybrid (alternating Mamba + Attention) |
+| `rwkv_scratch` | Alternative | RWKV — trains like transformer, runs like RNN |
+| `retnet_scratch` | Alternative | RetNet with multi-scale retention |
+| `gemini_scratch` | Multimodal | Gemini-style: text + image + audio + video + MoE |
+| `llava_scratch` | Multimodal | LLaVA vision-language model |
+| `veo3_scratch` | Video Gen | VeO3-style text-to-video diffusion |
+| `stable_diffusion_scratch` | Image Gen | Latent diffusion (VAE + UNet + text encoder) |
+| `nano_banana` | Experimental | Ultra-compact hybrid (Mamba + Attention + MoE) |
+| `custom_from_scratch` | Experimental | Blank canvas with composable blocks |
+| `adaptive_depth_scratch` | Efficient | Early-exit LLM (skips layers when confident) |
+
+Each blueprint has **scalable configs**: `nano`, `micro`, `small`, `medium`, `large`, `xl`.
+
+---
+
+### 2.2 Example: Build Llama 4 from Scratch
+
+This walks through building a Llama 4-class model (dense + MoE hybrid, GQA, RoPE, SwiGLU) from scratch, creating a dataset, training, and generating text.
+
+#### Step 1: Build the Architecture
+
+```bash
+# Build a Llama 4-style model: dense layers + MoE layers, GQA, long context
+curl -X POST http://localhost:8765/api/llm/build \
+  -H "Content-Type: application/json" \
+  -d '{
+    "vocab_size": 32000,
+    "d_model": 1024,
+    "n_layers": 16,
+    "n_heads": 16,
+    "n_kv_heads": 4,
+    "max_len": 8192,
+    "dropout": 0.0,
+    "norm_type": "rmsnorm",
+    "ffn_type": "swiglu",
+    "use_flash": true,
+    "tie_weights": true,
+    "use_moe": true,
+    "n_experts": 8,
+    "moe_top_k": 2,
+    "rope_base": 500000
+  }'
+```
+
+**What each parameter does (Llama 4 architecture):**
+
+| Parameter | Value | Why |
+|-----------|-------|-----|
+| `d_model: 1024` | Hidden dimension | Larger = more capacity |
+| `n_layers: 16` | Decoder blocks | More layers = deeper reasoning |
+| `n_heads: 16` | Attention heads | Parallel attention patterns |
+| `n_kv_heads: 4` | GQA key-value heads | 4x less KV cache memory (16/4 = 4 groups) |
+| `norm_type: rmsnorm` | RMS normalization | Faster than LayerNorm, same quality |
+| `ffn_type: swiglu` | Gated FFN | `FFN(x) = (SiLU(xW_gate) * xW_up) @ W_down` |
+| `use_moe: true` | Mixture of Experts | 8 FFN experts, only 2 active per token |
+| `rope_base: 500000` | Extended RoPE | Supports 8K+ context without quality loss |
+
+**Or use the blueprint with overrides:**
+
+```bash
+# Same thing, but starting from the claude_scratch blueprint
+curl -X POST http://localhost:8765/api/llm/blueprint/build \
+  -H "Content-Type: application/json" \
+  -d '{
+    "blueprint": "claude_scratch",
+    "scale": "medium",
+    "overrides": {
+      "use_moe": true,
+      "n_experts": 8,
+      "moe_top_k": 2,
+      "moe_layers": [4,5,6,7,8,9,10,11,12,13,14,15]
+    }
+  }'
+```
+
+#### Step 2: Train a Custom Tokenizer
+
+```bash
+# Train a BPE tokenizer on your data
+curl -X POST http://localhost:8765/api/llm/tokenizer/train \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Your training corpus goes here... (paste thousands of words)",
+    "algorithm": "bpe",
+    "vocab_size": 32000,
+    "min_frequency": 2
+  }'
+```
+
+#### Step 3: Train the Model
+
+```bash
+# Start training with text data
+curl -X POST http://localhost:8765/api/llm/train \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Your full training text corpus...",
+    "tokenizer": "char",
+    "max_len": 256,
+    "epochs": 20,
+    "batch_size": 8,
+    "learning_rate": 3e-4,
+    "scheduler": "cosine",
+    "scheduler_params": {"T_max": 20}
+  }'
+```
+
+Training broadcasts real-time metrics via WebSocket:
+- Loss per epoch
+- Learning rate schedule
+- Validation loss
+- Training speed (tokens/sec)
+
+#### Step 4: Generate Text
+
+```bash
+curl -X POST http://localhost:8765/api/llm/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "The future of artificial intelligence",
+    "max_tokens": 200,
+    "temperature": 0.8,
+    "top_k": 50
+  }'
+```
+
+#### Step 5: Modify the Architecture After Building
+
+```bash
+# Add a layer at position 8
+curl -X POST http://localhost:8765/api/llm/modify \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "add_layer",
+    "position": 8,
+    "config": {"n_heads": 16, "n_kv_heads": 4, "norm_type": "rmsnorm", "ffn_type": "swiglu"}
+  }'
+
+# Freeze first 4 layers (for fine-tuning)
+curl -X POST http://localhost:8765/api/llm/modify \
+  -d '{"action": "freeze_layer", "index": 0}'
+curl -X POST http://localhost:8765/api/llm/modify \
+  -d '{"action": "freeze_layer", "index": 1}'
+curl -X POST http://localhost:8765/api/llm/modify \
+  -d '{"action": "freeze_layer", "index": 2}'
+curl -X POST http://localhost:8765/api/llm/modify \
+  -d '{"action": "freeze_layer", "index": 3}'
+```
+
+---
+
+### 2.3 Example: Build a Gemini-style Multimodal Model
+
+```bash
+# Gemini-style: text + image + audio + video with MoE
+curl -X POST http://localhost:8765/api/llm/blueprint/build \
+  -d '{
+    "blueprint": "gemini_scratch",
+    "scale": "small",
+    "overrides": {
+      "modalities": ["text", "image", "audio", "video"],
+      "n_image_tokens": 64,
+      "n_video_tokens": 128
+    }
+  }'
+```
+
+The model automatically includes:
+- Image encoder (ViT patch embedding) + Perceiver Resampler (64 tokens)
+- Audio encoder (mel spectrogram + conv) + Perceiver Resampler (32 tokens)
+- Video encoder (per-frame patches + temporal pos) + Perceiver Resampler (128 tokens)
+- MoE decoder blocks (8 experts, top-2)
+- All modality tokens prepended to text for unified processing
+
+---
+
+### 2.4 Example: Build a VeO3-style Video Generation Model
+
+```bash
+# Step 1: Build all components
+curl -X POST http://localhost:8765/api/llm/blueprint/build-components \
+  -d '{
+    "blueprint": "veo3_scratch",
+    "scale": "small"
+  }'
+
+# Step 2: Train the VAE first (encodes video to latent space)
+curl -X POST http://localhost:8765/api/diffusion/train-vae \
+  -d '{
+    "epochs": 20,
+    "batch_size": 4,
+    "image_size": 64,
+    "learning_rate": 1e-4,
+    "kl_weight": 0.01
+  }'
+
+# Step 3: Train the UNet denoiser (in latent space)
+curl -X POST http://localhost:8765/api/diffusion/train \
+  -d '{
+    "mode": "image",
+    "epochs": 50,
+    "batch_size": 4,
+    "image_size": 64,
+    "use_vae": true,
+    "n_steps": 1000,
+    "schedule": "cosine"
+  }'
+
+# Step 4: Generate
+curl -X POST http://localhost:8765/api/diffusion/generate \
+  -d '{"n_images": 4, "n_steps": 50, "image_size": 64}'
+```
+
+---
+
+## Tutorial 3: Create Datasets from Scratch
+
+### 3.1 Using the Dataset Factory
+
+```bash
+# Create a text instruction dataset
+curl -X POST http://localhost:8765/api/ds/create \
+  -d '{
+    "name": "my_instruct_data",
+    "template": "instruct",
+    "format": "alpaca"
+  }'
+
+# Add samples
+curl -X POST http://localhost:8765/api/ds/my_instruct_data/add \
+  -d '{
+    "instruction": "Explain quantum computing",
+    "input": "",
+    "output": "Quantum computing uses qubits that can exist in superposition..."
+  }'
+```
+
+**21 dataset templates:**
+
+| Template | Category | Output Format |
+|----------|----------|--------------|
+| `instruct` | Text | Alpaca (instruction/input/output) |
+| `chat` | Text | ShareGPT (multi-turn conversations) |
+| `qa` | Text | Question/answer pairs |
+| `summarization` | Text | Article/summary pairs |
+| `translation` | Text | Source/target language pairs |
+| `sentiment` | Text | Text + positive/negative/neutral label |
+| `ner` | Text | Tokens + BIO entity tags |
+| `classification` | Image | Image path + class label |
+| `detection` | Image | Image + YOLO bounding boxes |
+| `segmentation` | Image | Image + COCO segmentation masks |
+| `captioning` | Image | Image + text description |
+| `asr` | Audio | Audio file + transcription |
+| `tts` | Audio | Text + audio file |
+| `audio_classification` | Audio | Audio + label |
+| `video_classification` | Video | Video + label |
+| `video_captioning` | Video | Video + text description |
+| `vqa` | Multimodal | Image + question + answer |
+| `tool_calling` | Text | Instruction + tool schema + expected call |
+| `preference` | Text | Prompt + chosen + rejected (for DPO/RLHF) |
+| `reward` | Text | Prompt + response + score |
+| `custom` | Any | Define your own schema |
+
+### 3.2 Export Formats
+
+```bash
+# Export to different formats
+curl -X POST http://localhost:8765/api/ds/my_instruct_data/export \
+  -d '{"format": "jsonl", "path": "./data/train.jsonl"}'
+
+curl -X POST http://localhost:8765/api/ds/my_instruct_data/export \
+  -d '{"format": "alpaca", "path": "./data/alpaca.json"}'
+
+curl -X POST http://localhost:8765/api/ds/my_instruct_data/export \
+  -d '{"format": "sharegpt", "path": "./data/sharegpt.json"}'
+```
+
+### 3.3 Load Data from External Sources
+
+```bash
+# From HuggingFace
+curl -X POST http://localhost:8765/api/hf/datasets/load \
+  -d '{"dataset_id": "tatsu-lab/alpaca", "split": "train"}'
+
+# From Kaggle
+curl -X POST http://localhost:8765/api/ds/sources/kaggle \
+  -d '{"dataset": "username/dataset-name"}'
+
+# From URL
+curl -X POST http://localhost:8765/api/ds/sources/download \
+  -d '{"url": "https://example.com/data.csv"}'
+```
+
+### 3.4 Convert Between Formats
+
+```bash
+# YOLO to COCO
+curl -X POST http://localhost:8765/api/ds/convert \
+  -d '{"from": "yolo", "to": "coco", "input_path": "./yolo_labels/", "output_path": "./coco.json"}'
+
+# Alpaca to ShareGPT
+curl -X POST http://localhost:8765/api/ds/convert \
+  -d '{"from": "alpaca", "to": "sharegpt", "input_path": "./alpaca.json", "output_path": "./sharegpt.json"}'
+```
+
+---
+
+## Tutorial 4: Create Entirely New Model Architectures
+
+This is for researchers who want to invent architectures that **don't exist yet**.
+
+### 4.1 Method A: Block Composer (No Code Required)
+
+Mix any of the 25+ composable block primitives:
+
+```bash
+# Build a novel block: Mamba + Sliding Window Attention + MoE FFN
+curl -X POST http://localhost:8765/api/llm/compose \
+  -d '{
+    "vocab_size": 32000,
+    "d_model": 512,
+    "n_layers": 8,
+    "n_heads": 8,
+    "default_block": [
+      {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+      {"type": "mamba", "config": {"d_state": 16, "expand": 2}},
+      {"type": "residual", "residual_from": -1},
+      {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+      {"type": "sliding_window_attention", "config": {"window_size": 512}},
+      {"type": "residual", "residual_from": 3},
+      {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+      {"type": "moe", "config": {"n_experts": 8, "top_k": 2}},
+      {"type": "residual", "residual_from": 5}
+    ]
+  }'
+```
+
+**All available step types:**
+
+| Type | Description |
+|------|-------------|
+| `norm` | RMSNorm or LayerNorm |
+| `attention` | Multi-head attention with RoPE, GQA, Flash |
+| `sliding_window_attention` | Local attention (Mistral-style) |
+| `linear_attention` | O(n) kernel-based attention |
+| `alibi_attention` | Attention with Linear Biases |
+| `ffn` | Feed-forward (SwiGLU / GeGLU / ReGLU / Standard) |
+| `moe` | Mixture of Experts with Top-K routing |
+| `mamba` | Selective State Space Model |
+| `rwkv` | RWKV linear attention |
+| `retention` | Multi-scale retention (RetNet) |
+| `hyena` | Long convolution via FFT |
+| `xlstm` | Extended LSTM with exponential gating |
+| `gated_recurrence` | Griffin/Hawk gated linear recurrence |
+| `parallel` | Run two components in parallel + merge |
+| `cross_attention` | Attend to external context |
+| `conv1d` | 1D convolution over sequence |
+| `residual` | Skip connection from previous step |
+| `dropout` | Regularization |
+| `linear` | Linear projection |
+| `activation` | Non-linear activation (relu/gelu/silu/...) |
+| `custom_code` | Write any nn.Module in Python |
+| `custom_formula` | Define FFN with a math formula |
+| `pos_encoding` | Positional encoding (absolute/sinusoidal) |
+| `embedding` | Standalone positional embedding |
+
+### 4.2 Method B: Full Custom Model from Python Code
+
+Define the **entire model** in Python with access to all 101+ building blocks:
+
+```bash
+curl -X POST http://localhost:8765/api/llm/novel/model-from-code \
+  -H "Content-Type: application/json" \
+  -d '{
+    "vocab_size": 32000,
+    "d_model": 512,
+    "code": "class Llama4(nn.Module):\n    def __init__(self, vocab_size=32000, d_model=512, n_layers=12, n_heads=8, n_kv_heads=4, **kw):\n        super().__init__()\n        self.vocab_size = vocab_size\n        self.tok_emb = nn.Embedding(vocab_size, d_model)\n        self.layers = nn.ModuleList()\n        for i in range(n_layers):\n            use_moe = i >= n_layers // 2  # Dense first half, MoE second half\n            self.layers.append(nn.ModuleDict({\n                \"norm1\": RMSNorm(d_model),\n                \"attn\": LLMAttention(d_model, n_heads=n_heads, n_kv_heads=n_kv_heads, max_len=8192, rope_base=500000),\n                \"norm2\": RMSNorm(d_model),\n                \"ffn\": MoELayer(d_model, n_experts=8, top_k=2) if use_moe else SwiGLUFFN(d_model),\n            }))\n        self.norm = RMSNorm(d_model)\n        self.head = nn.Linear(d_model, vocab_size, bias=False)\n        self.head.weight = self.tok_emb.weight\n    def forward(self, input_ids, labels=None):\n        x = self.tok_emb(input_ids.clamp(0, self.vocab_size-1))\n        for L in self.layers:\n            x = x + L[\"attn\"](L[\"norm1\"](x))\n            x = x + L[\"ffn\"](L[\"norm2\"](x))\n        logits = self.head(self.norm(x))\n        loss = None\n        if labels is not None:\n            loss = F.cross_entropy(logits[:,:-1].reshape(-1,self.vocab_size), labels[:,1:].reshape(-1), ignore_index=-100)\n        return {\"logits\": logits, \"loss\": loss}"
+  }'
+```
+
+**Available building blocks inside custom code:**
+
+| Category | Components |
+|----------|-----------|
+| **LLM Core** | `RMSNorm`, `LLMAttention`, `SwiGLUFFN`, `GeGLUFFN`, `MoELayer`, `MoERouter`, `RotaryPositionalEmbedding` |
+| **SSM** | `SelectiveScan`, `MambaBlock`, `RWKVBlock`, `RetentionLayer`, `HyenaOperator`, `XLSTM`, `GatedLinearRecurrence` |
+| **Vision** | `ResNetBlock`, `ConvNeXtBlock`, `MBConvBlock`, `VisionEncoder`, `PatchEmbed` |
+| **Diffusion** | `DiffusionUNet`, `VAE`, `DiffusionTimestepBlock`, `SpatialAttentionBlock`, `CrossAttentionBlock` |
+| **Video** | `VideoVAE`, `TemporalAttention`, `TemporalConv3d` |
+| **Multimodal** | `PerceiverResampler`, `PatchEmbedding`, `AudioEmbedding`, `ModalityProjector` |
+| **Training** | `DistillationWrapper` |
+| **PyTorch** | `torch`, `nn`, `F`, `math` + all standard modules |
+
+### 4.3 Method C: Validate, Benchmark, and Search
+
+```bash
+# Validate a novel design
+curl -X POST http://localhost:8765/api/llm/novel/validate \
+  -d '{
+    "block_design": [
+      {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+      {"type": "mamba", "config": {"d_state": 16}},
+      {"type": "residual", "residual_from": -1},
+      {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+      {"type": "attention", "config": {}},
+      {"type": "residual", "residual_from": 3}
+    ],
+    "d_model": 128,
+    "n_heads": 4,
+    "benchmark": true
+  }'
+
+# Response shows speed comparison vs Llama/Mamba/Minimal baselines
+
+# Architecture search: compare 10+ designs automatically
+curl -X POST http://localhost:8765/api/llm/novel/arch-search \
+  -d '{
+    "auto_search": true,
+    "text": "Your training text for comparison...",
+    "d_model": 128,
+    "train_steps": 30
+  }'
+
+# Response ranks all designs by: loss reduction, speed, param efficiency
+```
+
+### 4.4 Custom Loss Functions
+
+```bash
+# Formula-based loss (label smoothing)
+curl -X POST http://localhost:8765/api/llm/novel/custom-loss \
+  -d '{
+    "mode": "formula",
+    "formula": "0.9 * F.cross_entropy(logits.view(-1, vocab_size), labels.view(-1), ignore_index=-100) + 0.1 * (-F.log_softmax(logits, dim=-1).mean())"
+  }'
+
+# Full Python class loss
+curl -X POST http://localhost:8765/api/llm/novel/custom-loss \
+  -d '{
+    "mode": "code",
+    "code": "class FocalLoss(nn.Module):\n    def __init__(self, gamma=2.0, alpha=0.25):\n        super().__init__()\n        self.gamma = gamma\n        self.alpha = alpha\n    def forward(self, logits, labels, **kw):\n        ce = F.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1), reduction=\"none\", ignore_index=-100)\n        pt = torch.exp(-ce)\n        return (self.alpha * (1-pt)**self.gamma * ce).mean()"
+  }'
+```
+
+---
+
+## Tutorial 5: Complete Example — Build Llama 4 from Scratch (End to End)
+
+This is the full walkthrough: architecture design, dataset creation, tokenizer training, model training, evaluation, and generation.
+
+### Step 1: Design the Llama 4 Architecture
+
+Llama 4 features: dense initial layers + MoE deep layers, GQA (4 KV heads), RoPE with extended base, SwiGLU, RMSNorm.
+
+```
+UI Flow:
+1. Click "LLM Builder" in the top bar
+2. Open "Model Blueprints" section
+3. Select category: "Text LLMs"
+4. Click "Claude-style LLM (from scratch)" (closest to Llama 4)
+5. Select scale: "medium" (1024 d_model, 24 layers)
+6. In the config fields below, enable MoE checkbox
+7. Set Experts: 8, Top-K: 2
+8. Click "Build This Model"
+```
+
+```bash
+# API: Build Llama 4 (medium scale, ~350M params)
+curl -X POST http://localhost:8765/api/llm/build -d '{
+  "vocab_size": 32000, "d_model": 1024, "n_layers": 24,
+  "n_heads": 16, "n_kv_heads": 4, "max_len": 8192,
+  "norm_type": "rmsnorm", "ffn_type": "swiglu",
+  "use_moe": true, "n_experts": 8, "moe_top_k": 2,
+  "rope_base": 500000, "use_flash": true, "tie_weights": true
+}'
+```
+
+### Step 2: Create Training Dataset
+
+```
+UI Flow:
+1. In the left panel, expand "Dataset Factory"
+2. Select template: "instruct"
+3. Add samples using the form, or paste bulk data
+4. Export as Alpaca format
+```
+
+```bash
+# Or load an existing dataset from HuggingFace
+curl -X POST http://localhost:8765/api/hf/datasets/load -d '{
+  "dataset_id": "tatsu-lab/alpaca",
+  "split": "train"
+}'
+```
+
+For pre-training on raw text, just paste your corpus directly into the training text area.
+
+### Step 3: Train Tokenizer
+
+```
+UI Flow:
+1. Expand "Train Tokenizer" section in LLM Builder
+2. Select algorithm: "BPE (GPT-style)"
+3. Set vocab size: 32000
+4. Paste your training text (or it uses the LLM training text)
+5. Click "Train Tokenizer"
+```
+
+### Step 4: Train the Model
+
+```
+UI Flow:
+1. Expand "Training Data" section
+2. Paste your text corpus (or upload a .txt file)
+3. Set epochs: 20, batch size: 8, learning rate: 3e-4
+4. Select scheduler: Cosine
+5. Click "Start LLM Training"
+6. Watch real-time loss charts via WebSocket
+```
+
+```bash
+# API
+curl -X POST http://localhost:8765/api/llm/train -d '{
+  "text": "<your training corpus>",
+  "tokenizer": "custom_trained",
+  "max_len": 256,
+  "epochs": 20,
+  "batch_size": 8,
+  "learning_rate": 3e-4,
+  "scheduler": "cosine"
+}'
+```
+
+### Step 5: Generate Text
+
+```
+UI Flow:
+1. Expand "Generation" section
+2. Type your prompt
+3. Set temperature, top-k, max tokens
+4. Click "Generate"
+```
+
+```bash
+curl -X POST http://localhost:8765/api/llm/generate -d '{
+  "prompt": "Explain the theory of relativity",
+  "max_tokens": 200,
+  "temperature": 0.8,
+  "top_k": 50
+}'
+```
+
+### Step 6: Iterate on Architecture
+
+```bash
+# Try making some layers use attention, others use Mamba
+curl -X POST http://localhost:8765/api/llm/compose -d '{
+  "vocab_size": 32000, "d_model": 1024, "n_layers": 24, "n_heads": 16,
+  "block_designs": [
+    null, null, null, null, null, null, null, null,
+    [{"type":"norm","config":{"norm_type":"rmsnorm"}},
+     {"type":"mamba","config":{"d_state":16}},
+     {"type":"residual","residual_from":-1},
+     {"type":"norm","config":{"norm_type":"rmsnorm"}},
+     {"type":"moe","config":{"n_experts":8,"top_k":2}},
+     {"type":"residual","residual_from":2}],
+    null, null, null, null, null, null, null,
+    null, null, null, null, null, null, null, null
+  ]
+}'
+# Layers 0-7: standard Llama blocks
+# Layer 8: hybrid Mamba + MoE (experimental)
+# Layers 9-23: standard Llama blocks
+```
+
+---
+
+## Tutorial 6: Diffusion Model Training (Image/Video Generation)
+
+### 6.1 Train a Stable Diffusion Model from Scratch
+
+```
+UI Flow:
+1. LLM Builder → Advanced Models → Diffusion Model section
+2. Set Image Size: 64, Base Channels: 64
+3. Check "Latent Diffusion (VAE)"
+4. Click "Train VAE" first (20 epochs)
+5. After VAE training completes, click "Train UNet"
+6. After UNet training, click "Generate"
+```
+
+```bash
+# Step 1: Train VAE
+curl -X POST http://localhost:8765/api/diffusion/train-vae -d '{
+  "epochs": 20, "batch_size": 8, "image_size": 64,
+  "learning_rate": 1e-4, "kl_weight": 0.01
+}'
+
+# Step 2: Train UNet denoiser
+curl -X POST http://localhost:8765/api/diffusion/train -d '{
+  "mode": "image", "epochs": 50, "batch_size": 4,
+  "image_size": 64, "use_vae": true,
+  "n_steps": 1000, "schedule": "cosine"
+}'
+
+# Step 3: Generate images
+curl -X POST http://localhost:8765/api/diffusion/generate -d '{
+  "n_images": 4, "n_steps": 50, "image_size": 64
+}'
+```
+
+---
+
+## Tutorial 7: Invent a Frontier Model (Research Guide)
+
+### 7.1 Use the Novel Architecture Lab
+
+```
+UI Flow:
+1. LLM Builder → Novel Architecture Lab
+2. Pick a research template (e.g., "Multi-Scale Processing")
+3. Click "Validate" to verify shapes
+4. Click "Benchmark" to compare vs Llama/Mamba
+5. Click "Quick Train" to see if it learns
+6. Click "Architecture Search" to rank all designs
+7. Modify the design and repeat
+```
+
+### 7.2 Research Templates
+
+| Template | Key Idea | Components |
+|----------|----------|-----------|
+| Sparse Attention + SSM | Windowed attention for precision, Mamba for long-range | `sliding_window_attention` + `mamba` + `swiglu` |
+| Fully Parallel Block | Everything runs simultaneously with learned gating | `parallel(attention, mamba)` + `ffn` |
+| Recursive Layers | Same weights repeated N times (Universal Transformer) | Shared `attention` + `ffn` blocks |
+| Gated Expert SSM | Route tokens to specialized SSM experts | `moe` + `mamba` |
+| Multi-Scale Processing | Local conv + medium attention + global SSM | `conv1d` + `sliding_window` + `mamba` + `ffn` |
+| Write Your Own | Full Python code with all primitives | `custom_code` with any nn.Module |
+
+### 7.3 Architecture Search
+
+```bash
+# Compare your design against 10+ baselines automatically
+curl -X POST http://localhost:8765/api/llm/novel/arch-search -d '{
+  "auto_search": true,
+  "designs": {
+    "my_frontier_design": [
+      {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+      {"type": "parallel", "config": {
+        "branch_a": {"type": "attention", "config": {}},
+        "branch_b": {"type": "mamba", "config": {"d_state": 16}},
+        "merge": "gate"
+      }},
+      {"type": "residual", "residual_from": -1},
+      {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+      {"type": "moe", "config": {"n_experts": 4, "top_k": 1}},
+      {"type": "residual", "residual_from": 3}
+    ]
+  },
+  "text": "Training text for comparison...",
+  "d_model": 128, "train_steps": 30
+}'
+
+# Response: ranked table of all designs by loss reduction, speed, efficiency
+```
+
+---
+
+## API Quick Reference (New Endpoints)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/llm/blueprints` | GET | List all 18 model blueprints |
+| `/api/llm/blueprint/build` | POST | Build model from blueprint + scale |
+| `/api/llm/blueprint/modify` | POST | Modify blueprint model config |
+| `/api/llm/blueprint/build-components` | POST | Build multi-component models (VeO3, SD) |
+| `/api/llm/novel/validate` | POST | Validate novel block design |
+| `/api/llm/novel/experiment` | POST | Quick-train novel architecture |
+| `/api/llm/novel/templates` | GET | Get 6 research starter templates |
+| `/api/llm/novel/model-from-code` | POST | Build full model from Python code |
+| `/api/llm/novel/custom-loss` | POST | Set custom loss function |
+| `/api/llm/novel/arch-search` | POST | Compare multiple architectures |
+| `/api/diffusion/train` | POST | Train diffusion UNet |
+| `/api/diffusion/train-vae` | POST | Train VAE for latent diffusion |
+| `/api/diffusion/generate` | POST | Generate images from trained model |
+
+---
+
+## Tests
+
+```bash
+pip install pytest httpx
+pytest tests/ -v   # 598 tests
+```
+
+598 tests covering core, server, datasets, LLM, blueprints, novel architectures, diffusion, and more.

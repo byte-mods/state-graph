@@ -651,6 +651,11 @@ class CustomComponent(nn.Module):
 
     The code must define a class `CustomModule(nn.Module)` with
     __init__(self, d_model, **kwargs) and forward(self, x).
+
+    Available imports in custom code:
+      torch, nn, F, math, Optional
+      + all primitives from state_graph.layers.custom (ResNetBlock, SelectiveScan, etc.)
+      + all LLM components (RMSNorm, LLMAttention, SwiGLUFFN, MoELayer, etc.)
     """
 
     @staticmethod
@@ -662,6 +667,25 @@ class CustomComponent(nn.Module):
             "math": math,
             "Optional": Optional,
         }
+        # Inject custom layer primitives for use in novel architectures
+        try:
+            import state_graph.layers.custom as _custom
+            for attr in dir(_custom):
+                obj = getattr(_custom, attr)
+                if isinstance(obj, type) and issubclass(obj, nn.Module):
+                    safe_globals[attr] = obj
+        except ImportError:
+            pass
+        # Inject LLM components
+        safe_globals["RMSNorm"] = RMSNorm
+        safe_globals["LLMAttention"] = LLMAttention
+        safe_globals["SwiGLUFFN"] = SwiGLUFFN
+        safe_globals["GeGLUFFN"] = GeGLUFFN
+        safe_globals["MoELayer"] = MoELayer
+        safe_globals["MoERouter"] = MoERouter
+        safe_globals["RotaryPositionalEmbedding"] = RotaryPositionalEmbedding
+        safe_globals["apply_rotary_pos_emb"] = apply_rotary_pos_emb
+
         local_ns: dict = {}
         exec(code, safe_globals, local_ns)  # noqa: S102
 
@@ -2171,6 +2195,54 @@ BLOCK_DESIGNS = {
         {"type": "ffn", "config": {"ffn_type": "swiglu"}},
         {"type": "residual", "residual_from": 5},
     ],
+    # Novel / experimental designs for frontier research
+    "parallel_moe_mamba": [
+        # Parallel MoE + Mamba — experts specialize while SSM handles sequence
+        {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+        {"type": "parallel", "config": {
+            "branch_a": {"type": "mamba", "config": {"d_state": 16, "expand": 2}},
+            "branch_b": {"type": "moe", "config": {"n_experts": 4, "top_k": 1}},
+            "merge": "gate",
+        }},
+        {"type": "residual", "residual_from": -1},
+    ],
+    "triple_hybrid": [
+        # Mamba → Attention → Conv1d — three complementary sequence operators
+        {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+        {"type": "mamba", "config": {"d_state": 16}},
+        {"type": "residual", "residual_from": -1},
+        {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+        {"type": "attention", "config": {}},
+        {"type": "residual", "residual_from": 3},
+        {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+        {"type": "conv1d", "config": {"kernel_size": 7, "groups": 1}},
+        {"type": "activation", "config": {"name": "silu"}},
+        {"type": "residual", "residual_from": 5},
+        {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+        {"type": "ffn", "config": {"ffn_type": "swiglu"}},
+        {"type": "residual", "residual_from": 9},
+    ],
+    "retention_moe": [
+        # RetNet + MoE — efficient inference + expert specialization
+        {"type": "norm", "config": {"norm_type": "layernorm"}},
+        {"type": "retention", "config": {}},
+        {"type": "residual", "residual_from": -1},
+        {"type": "norm", "config": {"norm_type": "layernorm"}},
+        {"type": "moe", "config": {"n_experts": 8, "top_k": 2}},
+        {"type": "residual", "residual_from": 3},
+    ],
+    "hyena_attention_hybrid": [
+        # Hyena for long-range + attention for precision
+        {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+        {"type": "hyena", "config": {"order": 2}},
+        {"type": "residual", "residual_from": -1},
+        {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+        {"type": "sliding_window_attention", "config": {"window_size": 512}},
+        {"type": "residual", "residual_from": 3},
+        {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+        {"type": "ffn", "config": {"ffn_type": "swiglu"}},
+        {"type": "residual", "residual_from": 5},
+    ],
 }
 
 
@@ -2313,6 +2385,62 @@ COMPONENT_CATALOG = {
             "encoding_type": {"type": "select", "options": ["absolute", "sinusoidal", "none"], "default": "absolute"},
         },
     },
+    "mamba": {
+        "name": "Mamba SSM",
+        "description": "Selective State Space Model — O(n) sequence modeling without attention. Input-dependent dynamics.",
+        "config_schema": {
+            "d_state": {"type": "int", "default": 16, "min": 4, "description": "SSM state dimension"},
+            "expand": {"type": "int", "default": 2, "min": 1, "description": "Inner dimension multiplier"},
+            "conv_kernel": {"type": "int", "default": 4, "min": 1},
+            "dropout": {"type": "float", "default": 0.0},
+        },
+    },
+    "rwkv": {
+        "name": "RWKV",
+        "description": "Receptance-Weighted Key-Value — RNN-like at inference, transformer-like at training. O(1) per token.",
+        "config_schema": {
+            "dropout": {"type": "float", "default": 0.0},
+        },
+    },
+    "retention": {
+        "name": "Retention (RetNet)",
+        "description": "Multi-scale retention — parallel training, recurrent inference, chunk-wise long context.",
+        "config_schema": {
+            "n_heads": {"type": "int", "default": 8, "min": 1},
+            "dropout": {"type": "float", "default": 0.0},
+        },
+    },
+    "hyena": {
+        "name": "Hyena Operator",
+        "description": "Long convolution via implicit parametrization. Sub-quadratic, good for very long sequences.",
+        "config_schema": {
+            "order": {"type": "int", "default": 2, "min": 1, "description": "Hyena order (depth of gating)"},
+            "dropout": {"type": "float", "default": 0.0},
+        },
+    },
+    "xlstm": {
+        "name": "xLSTM",
+        "description": "Extended LSTM with exponential gating — modernized LSTM for language modeling.",
+        "config_schema": {
+            "n_layers": {"type": "int", "default": 1, "min": 1},
+            "dropout": {"type": "float", "default": 0.0},
+        },
+    },
+    "gated_recurrence": {
+        "name": "Gated Linear Recurrence (Griffin)",
+        "description": "Griffin/Hawk gated linear recurrence — efficient alternative to attention for local patterns.",
+        "config_schema": {
+            "expand": {"type": "int", "default": 2, "min": 1},
+            "dropout": {"type": "float", "default": 0.0},
+        },
+    },
+    "embedding": {
+        "name": "Positional Embedding",
+        "description": "Standalone positional embedding (absolute or sinusoidal). For use in custom architectures.",
+        "config_schema": {
+            "type": {"type": "select", "options": ["absolute", "sinusoidal"], "default": "absolute"},
+        },
+    },
 }
 
 
@@ -2321,29 +2449,758 @@ COMPONENT_CATALOG = {
 # ---------------------------------------------------------------------------
 from state_graph.core.registry import Registry
 
-Registry.register_layer("RMSNorm", RMSNorm)
-Registry.register_layer("RotaryPositionalEmbedding", RotaryPositionalEmbedding)
-Registry.register_layer("LLMAttention", LLMAttention)
-Registry.register_layer("SwiGLUFFN", SwiGLUFFN)
-Registry.register_layer("GeGLUFFN", GeGLUFFN)
-Registry.register_layer("ReGLUFFN", ReGLUFFN)
-Registry.register_layer("StandardFFN", StandardFFN)
-Registry.register_layer("MoELayer", MoELayer)
-Registry.register_layer("LLMDecoderBlock", LLMDecoderBlock)
-Registry.register_layer("LLMModel", LLMModel)
-Registry.register_layer("ComposableBlock", ComposableBlock)
-Registry.register_layer("ComposableLLM", ComposableLLM)
-Registry.register_layer("CustomFFN", CustomFFN)
-Registry.register_layer("SlidingWindowAttention", SlidingWindowAttention)
-Registry.register_layer("LinearAttention", LinearAttention)
-Registry.register_layer("ALiBiAttention", ALiBiAttention)
-Registry.register_layer("ParallelBranch", ParallelBranch)
-Registry.register_layer("AbsolutePositionalEncoding", AbsolutePositionalEncoding)
-Registry.register_layer("SinusoidalPositionalEncoding", SinusoidalPositionalEncoding)
-Registry.register_layer("EncoderBlock", EncoderBlock)
-Registry.register_layer("DecoderBlockWithCrossAttn", DecoderBlockWithCrossAttn)
-Registry.register_layer("EncoderDecoderLLM", EncoderDecoderLLM)
-Registry.register_layer("AdaptiveDepthLLM", AdaptiveDepthLLM)
-Registry.register_layer("PatchEmbedding", PatchEmbedding)
-Registry.register_layer("AudioEmbedding", AudioEmbedding)
-Registry.register_layer("MultiModalLLM", MultiModalLLM)
+# LLM Core
+Registry.register_layer("RMSNorm", RMSNorm, category="LLM")
+Registry.register_layer("RotaryPositionalEmbedding", RotaryPositionalEmbedding, category="LLM")
+Registry.register_layer("LLMAttention", LLMAttention, category="LLM")
+Registry.register_layer("SwiGLUFFN", SwiGLUFFN, category="LLM")
+Registry.register_layer("GeGLUFFN", GeGLUFFN, category="LLM")
+Registry.register_layer("ReGLUFFN", ReGLUFFN, category="LLM")
+Registry.register_layer("StandardFFN", StandardFFN, category="LLM")
+Registry.register_layer("MoELayer", MoELayer, category="LLM")
+Registry.register_layer("LLMDecoderBlock", LLMDecoderBlock, category="LLM")
+Registry.register_layer("LLMModel", LLMModel, category="LLM")
+Registry.register_layer("CustomFFN", CustomFFN, category="LLM")
+
+# LLM Attention Variants
+Registry.register_layer("SlidingWindowAttention", SlidingWindowAttention, category="LLM Attention")
+Registry.register_layer("LinearAttention", LinearAttention, category="LLM Attention")
+Registry.register_layer("ALiBiAttention", ALiBiAttention, category="LLM Attention")
+
+# LLM Positional Encoding
+Registry.register_layer("AbsolutePositionalEncoding", AbsolutePositionalEncoding, category="LLM")
+Registry.register_layer("SinusoidalPositionalEncoding", SinusoidalPositionalEncoding, category="LLM")
+
+# Composable Architecture
+Registry.register_layer("ComposableBlock", ComposableBlock, category="LLM Composable")
+Registry.register_layer("ComposableLLM", ComposableLLM, category="LLM Composable")
+Registry.register_layer("ParallelBranch", ParallelBranch, category="LLM Composable")
+
+# Encoder-Decoder
+Registry.register_layer("EncoderBlock", EncoderBlock, category="Encoder-Decoder")
+Registry.register_layer("DecoderBlockWithCrossAttn", DecoderBlockWithCrossAttn, category="Encoder-Decoder")
+Registry.register_layer("EncoderDecoderLLM", EncoderDecoderLLM, category="Encoder-Decoder")
+Registry.register_layer("AdaptiveDepthLLM", AdaptiveDepthLLM, category="LLM")
+
+# Multi-Modal
+Registry.register_layer("PatchEmbedding", PatchEmbedding, category="Multi-Modal")
+Registry.register_layer("AudioEmbedding", AudioEmbedding, category="Multi-Modal")
+Registry.register_layer("MultiModalLLM", MultiModalLLM, category="Multi-Modal")
+
+
+# ---------------------------------------------------------------------------
+# Video Embedding for multimodal
+# ---------------------------------------------------------------------------
+
+class VideoEmbedding(nn.Module):
+    """Encode video frames into a sequence of embeddings.
+
+    Input: (B, T, C, H, W) video tensor
+    Output: (B, T*num_patches, d_model) embedding sequence
+
+    Uses per-frame patch embedding + temporal positional encoding.
+    """
+
+    def __init__(self, d_model: int = 512, patch_size: int = 16,
+                 in_channels: int = 3, image_size: int = 224,
+                 max_frames: int = 64):
+        super().__init__()
+        self.patch_size = patch_size
+        self.n_patches = (image_size // patch_size) ** 2
+        self.d_model = d_model
+        self.max_frames = max_frames
+
+        self.patch_proj = nn.Conv2d(in_channels, d_model, kernel_size=patch_size, stride=patch_size)
+        self.spatial_pos = nn.Parameter(torch.randn(1, self.n_patches, d_model) * 0.02)
+        self.temporal_pos = nn.Parameter(torch.randn(1, max_frames, d_model) * 0.02)
+        self.cls_token = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, C, H, W = x.shape
+        # Process each frame
+        x = x.reshape(B * T, C, H, W)
+        patches = self.patch_proj(x).flatten(2).transpose(1, 2)  # (B*T, N, D)
+        patches = patches + self.spatial_pos[:, :patches.shape[1]]
+        patches = patches.reshape(B, T, -1, self.d_model)
+
+        # Add temporal position
+        temp_pos = self.temporal_pos[:, :T].unsqueeze(2)  # (1, T, 1, D)
+        patches = patches + temp_pos
+
+        # Flatten: (B, T*N, D) and prepend CLS
+        patches = patches.reshape(B, -1, self.d_model)
+        cls = self.cls_token.expand(B, -1, -1)
+        return torch.cat([cls, patches], dim=1)
+
+
+# ---------------------------------------------------------------------------
+# Enhanced MultiModal LLM (Gemini-style: text + image + audio + video)
+# ---------------------------------------------------------------------------
+
+class UnifiedMultiModalLLM(nn.Module):
+    """Gemini-style unified multimodal LLM.
+
+    Supports any combination of: text, image, audio, video
+    Each modality has its own encoder + perceiver resampler for fixed-length tokens.
+    All modality tokens are interleaved/prepended to text and processed by decoder.
+
+    Key differences from MultiModalLLM:
+    - Perceiver resampler for each modality (fixed token count)
+    - Video support
+    - Multiple images/audio per input
+    - MoE support in decoder layers
+    - Cross-attention fusion option
+    """
+
+    def __init__(
+        self,
+        vocab_size: int = 32000,
+        d_model: int = 512,
+        n_layers: int = 12,
+        n_heads: int = 8,
+        n_kv_heads: Optional[int] = None,
+        max_len: int = 4096,
+        dropout: float = 0.0,
+        norm_type: str = "rmsnorm",
+        ffn_type: str = "swiglu",
+        tie_weights: bool = True,
+        # MoE config
+        use_moe: bool = False,
+        moe_layers: Optional[list[int]] = None,
+        n_experts: int = 8,
+        moe_top_k: int = 2,
+        # Image config
+        image_size: int = 224,
+        patch_size: int = 16,
+        n_image_tokens: int = 64,
+        # Audio config
+        n_mels: int = 80,
+        n_audio_tokens: int = 32,
+        # Video config
+        max_frames: int = 32,
+        n_video_tokens: int = 128,
+        # Modalities
+        modalities: Optional[list[str]] = None,
+        # Perceiver resampler depth
+        resampler_layers: int = 2,
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.vocab_size = vocab_size
+        self.n_layers = n_layers
+        self.max_len = max_len
+        self.modalities = modalities or ["text"]
+
+        # Text
+        self.tok_emb = nn.Embedding(vocab_size, d_model)
+        self.drop = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+
+        # Image encoder + resampler
+        if "image" in self.modalities:
+            self.image_encoder = PatchEmbedding(d_model, patch_size, 3, image_size)
+            from state_graph.layers.custom import PerceiverResampler
+            self.image_resampler = PerceiverResampler(d_model, d_model, n_image_tokens,
+                                                       n_heads, resampler_layers)
+
+        # Audio encoder + resampler
+        if "audio" in self.modalities:
+            self.audio_encoder = AudioEmbedding(d_model, n_mels)
+            from state_graph.layers.custom import PerceiverResampler
+            self.audio_resampler = PerceiverResampler(d_model, d_model, n_audio_tokens,
+                                                       n_heads, resampler_layers)
+
+        # Video encoder + resampler
+        if "video" in self.modalities:
+            self.video_encoder = VideoEmbedding(d_model, patch_size, 3, image_size, max_frames)
+            from state_graph.layers.custom import PerceiverResampler
+            self.video_resampler = PerceiverResampler(d_model, d_model, n_video_tokens,
+                                                       n_heads, resampler_layers)
+
+        # Determine MoE layers
+        if moe_layers is None and use_moe:
+            moe_layers = list(range(1, n_layers, 2))
+        moe_set = set(moe_layers or [])
+
+        # Decoder blocks
+        self.layers = nn.ModuleList([
+            LLMDecoderBlock(
+                d_model=d_model, n_heads=n_heads, n_kv_heads=n_kv_heads,
+                dropout=dropout, norm_type=norm_type, ffn_type=ffn_type,
+                max_len=max_len, use_moe=(i in moe_set),
+                n_experts=n_experts, moe_top_k=moe_top_k,
+            )
+            for i in range(n_layers)
+        ])
+
+        NormClass = nn.LayerNorm if norm_type == "layernorm" else RMSNorm
+        self.norm = NormClass(d_model)
+        self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
+
+        if tie_weights:
+            self.lm_head.weight = self.tok_emb.weight
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.normal_(module.weight, mean=0.0, std=0.02)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+            elif isinstance(module, nn.Embedding):
+                nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    def forward(self, input_ids: torch.Tensor,
+                images: Optional[torch.Tensor] = None,
+                audio: Optional[torch.Tensor] = None,
+                video: Optional[torch.Tensor] = None,
+                labels: Optional[torch.Tensor] = None) -> dict:
+        text_emb = self.drop(self.tok_emb(input_ids))
+        prefix_embeds = []
+
+        if images is not None and "image" in self.modalities:
+            img_emb = self.image_encoder(images)
+            img_emb = self.image_resampler(img_emb)
+            prefix_embeds.append(img_emb)
+
+        if audio is not None and "audio" in self.modalities:
+            aud_emb = self.audio_encoder(audio)
+            aud_emb = self.audio_resampler(aud_emb)
+            prefix_embeds.append(aud_emb)
+
+        if video is not None and "video" in self.modalities:
+            vid_emb = self.video_encoder(video)
+            vid_emb = self.video_resampler(vid_emb)
+            prefix_embeds.append(vid_emb)
+
+        if prefix_embeds:
+            all_prefix = torch.cat(prefix_embeds, dim=1)
+            x = torch.cat([all_prefix, text_emb], dim=1)
+        else:
+            x = text_emb
+
+        for layer in self.layers:
+            x = layer(x)
+
+        x = self.norm(x)
+        logits = self.lm_head(x)
+
+        loss = None
+        if labels is not None:
+            n_prefix = sum(e.shape[1] for e in prefix_embeds) if prefix_embeds else 0
+            text_logits = logits[:, n_prefix:, :]
+            shift_logits = text_logits[:, :-1, :].contiguous()
+            shift_labels = labels[:, 1:].contiguous()
+            loss = F.cross_entropy(
+                shift_logits.view(-1, self.vocab_size),
+                shift_labels.view(-1),
+                ignore_index=-100,
+            )
+            # Add MoE auxiliary loss
+            moe_loss = sum(
+                layer.ffn.aux_loss for layer in self.layers
+                if isinstance(layer.ffn, MoELayer)
+            )
+            if moe_loss > 0:
+                loss = loss + 0.01 * moe_loss
+
+        return {"logits": logits, "loss": loss}
+
+    @torch.no_grad()
+    def generate(self, input_ids: torch.Tensor,
+                 images=None, audio=None, video=None,
+                 max_new_tokens: int = 100, temperature: float = 0.8,
+                 top_k: int = 50, top_p: float = 0.9) -> torch.Tensor:
+        for _ in range(max_new_tokens):
+            out = self(input_ids[:, -self.max_len:], images=images, audio=audio, video=video)
+            logits = out["logits"][:, -1, :] / max(temperature, 1e-5)
+            if top_k > 0:
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < v[:, [-1]]] = float("-inf")
+            if top_p < 1.0:
+                sorted_logits, sorted_idx = torch.sort(logits, descending=True)
+                cum = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                remove = cum - F.softmax(sorted_logits, dim=-1) >= top_p
+                sorted_logits[remove] = float("-inf")
+                logits = sorted_logits.scatter(1, sorted_idx, sorted_logits)
+            probs = F.softmax(logits, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1)
+            input_ids = torch.cat([input_ids, next_token], dim=1)
+            images = audio = video = None  # Only encode on first pass
+        return input_ids
+
+    def count_parameters(self) -> dict:
+        total = sum(p.numel() for p in self.parameters())
+        trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        result = {"total": total, "trainable": trainable, "total_M": f"{total / 1e6:.1f}M"}
+        for mod in ["image", "audio", "video"]:
+            if mod in self.modalities:
+                enc = getattr(self, f"{mod}_encoder", None)
+                if enc:
+                    result[f"{mod}_encoder"] = sum(p.numel() for p in enc.parameters())
+        return result
+
+
+# ---------------------------------------------------------------------------
+# MODEL BLUEPRINTS — Complete architecture configurations
+# ---------------------------------------------------------------------------
+# These define full model architectures that users can instantiate and modify.
+# Each blueprint specifies the model class, default parameters, and description.
+
+MODEL_BLUEPRINTS = {
+    # ===== TEXT-ONLY LLMs =====
+    "gpt2_scratch": {
+        "name": "GPT-2 (from scratch)",
+        "category": "text_llm",
+        "description": "OpenAI GPT-2 architecture — decoder-only transformer with LayerNorm + Standard FFN. Good for learning language modeling fundamentals.",
+        "model_class": "LLMModel",
+        "config": {
+            "vocab_size": 50257, "d_model": 768, "n_layers": 12, "n_heads": 12,
+            "max_len": 1024, "norm_type": "layernorm", "ffn_type": "standard",
+            "dropout": 0.1, "tie_weights": True,
+        },
+        "scalable_configs": {
+            "nano": {"d_model": 128, "n_layers": 4, "n_heads": 4, "max_len": 256},
+            "micro": {"d_model": 256, "n_layers": 6, "n_heads": 4, "max_len": 512},
+            "small": {"d_model": 512, "n_layers": 8, "n_heads": 8, "max_len": 1024},
+            "medium": {"d_model": 768, "n_layers": 12, "n_heads": 12, "max_len": 1024},
+            "large": {"d_model": 1024, "n_layers": 24, "n_heads": 16, "max_len": 1024},
+            "xl": {"d_model": 1600, "n_layers": 48, "n_heads": 25, "max_len": 1024},
+        },
+        "training_tips": "Use AdamW with lr=6e-4, cosine schedule, warmup 2000 steps. Batch size 64-512.",
+    },
+    "llama_scratch": {
+        "name": "Llama (from scratch)",
+        "category": "text_llm",
+        "description": "Meta Llama architecture — RMSNorm, SwiGLU FFN, RoPE, GQA. State-of-the-art open-source LLM design.",
+        "model_class": "LLMModel",
+        "config": {
+            "vocab_size": 32000, "d_model": 512, "n_layers": 8, "n_heads": 8,
+            "n_kv_heads": 4, "max_len": 2048, "norm_type": "rmsnorm",
+            "ffn_type": "swiglu", "dropout": 0.0, "tie_weights": True,
+            "rope_base": 10000.0,
+        },
+        "scalable_configs": {
+            "nano": {"d_model": 128, "n_layers": 4, "n_heads": 4, "n_kv_heads": 2, "max_len": 512},
+            "micro": {"d_model": 256, "n_layers": 6, "n_heads": 4, "n_kv_heads": 2, "max_len": 1024},
+            "small": {"d_model": 512, "n_layers": 8, "n_heads": 8, "n_kv_heads": 4, "max_len": 2048},
+            "medium": {"d_model": 1024, "n_layers": 16, "n_heads": 16, "n_kv_heads": 4, "max_len": 4096},
+            "large": {"d_model": 2048, "n_layers": 24, "n_heads": 32, "n_kv_heads": 8, "max_len": 4096},
+            "xl": {"d_model": 4096, "n_layers": 32, "n_heads": 32, "n_kv_heads": 8, "max_len": 8192},
+        },
+        "training_tips": "Use AdamW with lr=3e-4, cosine schedule. GQA reduces KV cache by 4x. Train on large text corpora.",
+    },
+    "claude_scratch": {
+        "name": "Claude-style LLM (from scratch)",
+        "category": "text_llm",
+        "description": "Claude/Anthropic-style architecture — deep decoder-only with RMSNorm, SwiGLU, GQA, long context. Designed for instruction following and safety.",
+        "model_class": "LLMModel",
+        "config": {
+            "vocab_size": 65536, "d_model": 512, "n_layers": 12, "n_heads": 8,
+            "n_kv_heads": 4, "max_len": 4096, "norm_type": "rmsnorm",
+            "ffn_type": "swiglu", "dropout": 0.0, "tie_weights": True,
+            "rope_base": 500000.0,  # Extended context RoPE
+        },
+        "scalable_configs": {
+            "nano": {"d_model": 128, "n_layers": 6, "n_heads": 4, "n_kv_heads": 2, "max_len": 1024},
+            "micro": {"d_model": 256, "n_layers": 8, "n_heads": 4, "n_kv_heads": 2, "max_len": 2048},
+            "small": {"d_model": 512, "n_layers": 12, "n_heads": 8, "n_kv_heads": 4, "max_len": 4096},
+            "medium": {"d_model": 1024, "n_layers": 24, "n_heads": 16, "n_kv_heads": 4, "max_len": 8192},
+            "large": {"d_model": 2048, "n_layers": 32, "n_heads": 32, "n_kv_heads": 8, "max_len": 16384},
+            "xl": {"d_model": 4096, "n_layers": 48, "n_heads": 64, "n_kv_heads": 8, "max_len": 65536},
+        },
+        "training_tips": "Pre-train on large text corpus, then SFT on instruction data, then RLHF/DPO for alignment. Use rope_base=500000 for long context.",
+    },
+    "mistral_scratch": {
+        "name": "Mistral (from scratch)",
+        "category": "text_llm",
+        "description": "Mistral architecture — Sliding Window Attention + GQA + SwiGLU. Efficient long-context model.",
+        "model_class": "ComposableLLM",
+        "config": {
+            "vocab_size": 32000, "d_model": 512, "n_layers": 8, "n_heads": 8,
+            "n_kv_heads": 2, "max_len": 4096, "norm_type": "rmsnorm",
+        },
+        "default_block": [
+            {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+            {"type": "sliding_window_attention", "config": {"window_size": 1024}},
+            {"type": "residual", "residual_from": -1},
+            {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+            {"type": "ffn", "config": {"ffn_type": "swiglu"}},
+            {"type": "residual", "residual_from": 2},
+        ],
+        "scalable_configs": {
+            "nano": {"d_model": 128, "n_layers": 4, "n_heads": 4, "n_kv_heads": 1},
+            "small": {"d_model": 512, "n_layers": 8, "n_heads": 8, "n_kv_heads": 2},
+            "medium": {"d_model": 1024, "n_layers": 16, "n_heads": 16, "n_kv_heads": 4},
+            "large": {"d_model": 2048, "n_layers": 32, "n_heads": 32, "n_kv_heads": 8},
+        },
+        "training_tips": "Sliding window attention enables O(n*w) instead of O(n^2). Good for long documents.",
+    },
+    "mixtral_scratch": {
+        "name": "Mixtral MoE (from scratch)",
+        "category": "text_llm",
+        "description": "Mixtral-style Mixture of Experts — every other layer is MoE with 8 experts, top-2 routing. More parameters but same compute as dense model.",
+        "model_class": "LLMModel",
+        "config": {
+            "vocab_size": 32000, "d_model": 512, "n_layers": 8, "n_heads": 8,
+            "n_kv_heads": 2, "max_len": 2048, "norm_type": "rmsnorm",
+            "ffn_type": "swiglu", "use_moe": True, "n_experts": 8, "moe_top_k": 2,
+        },
+        "scalable_configs": {
+            "nano": {"d_model": 128, "n_layers": 4, "n_heads": 4, "n_experts": 4, "moe_top_k": 2},
+            "small": {"d_model": 512, "n_layers": 8, "n_heads": 8, "n_experts": 8, "moe_top_k": 2},
+            "medium": {"d_model": 1024, "n_layers": 16, "n_heads": 16, "n_experts": 8, "moe_top_k": 2},
+            "large": {"d_model": 2048, "n_layers": 32, "n_heads": 32, "n_experts": 16, "moe_top_k": 2},
+        },
+        "training_tips": "MoE uses ~2x active params with 8x total. Add 0.01 * load_balancing_loss. Good for scaling cheaply.",
+    },
+    "deepseek_scratch": {
+        "name": "DeepSeek-style (from scratch)",
+        "category": "text_llm",
+        "description": "DeepSeek architecture — dense first layers, MoE deeper layers, fine-grained experts. Efficient scaling strategy.",
+        "model_class": "LLMModel",
+        "config": {
+            "vocab_size": 32000, "d_model": 512, "n_layers": 12, "n_heads": 8,
+            "n_kv_heads": 4, "max_len": 4096, "norm_type": "rmsnorm",
+            "ffn_type": "swiglu", "use_moe": True, "n_experts": 16, "moe_top_k": 2,
+            "moe_layers": [4, 5, 6, 7, 8, 9, 10, 11],  # Dense first 4, MoE last 8
+        },
+        "scalable_configs": {
+            "nano": {"d_model": 128, "n_layers": 6, "n_heads": 4, "n_experts": 8,
+                     "moe_layers": [3, 4, 5]},
+            "small": {"d_model": 512, "n_layers": 12, "n_heads": 8, "n_experts": 16,
+                      "moe_layers": [4, 5, 6, 7, 8, 9, 10, 11]},
+            "medium": {"d_model": 1024, "n_layers": 24, "n_heads": 16, "n_experts": 32,
+                       "moe_layers": list(range(8, 24))},
+        },
+        "training_tips": "Dense initial layers learn shared representations; MoE later layers specialize. Use auxiliary loss for load balancing.",
+    },
+
+    # ===== ENCODER-DECODER =====
+    "t5_scratch": {
+        "name": "T5 (from scratch)",
+        "category": "encoder_decoder",
+        "description": "Google T5 encoder-decoder — bidirectional encoder + autoregressive decoder with cross-attention. Text-to-text framework.",
+        "model_class": "EncoderDecoderLLM",
+        "config": {
+            "vocab_size": 32128, "d_model": 512, "n_encoder_layers": 6,
+            "n_decoder_layers": 6, "n_heads": 8, "max_len": 512,
+            "norm_type": "layernorm", "ffn_type": "standard",
+            "pos_encoding": "sinusoidal", "share_embeddings": True,
+        },
+        "scalable_configs": {
+            "nano": {"d_model": 128, "n_encoder_layers": 3, "n_decoder_layers": 3, "n_heads": 4},
+            "small": {"d_model": 512, "n_encoder_layers": 6, "n_decoder_layers": 6, "n_heads": 8},
+            "base": {"d_model": 768, "n_encoder_layers": 12, "n_decoder_layers": 12, "n_heads": 12},
+            "large": {"d_model": 1024, "n_encoder_layers": 24, "n_decoder_layers": 24, "n_heads": 16},
+        },
+        "training_tips": "Use span corruption pre-training objective. Teacher forcing during training, beam search for inference.",
+    },
+
+    # ===== ALTERNATIVE ARCHITECTURES =====
+    "mamba_scratch": {
+        "name": "Mamba SSM (from scratch)",
+        "category": "alternative",
+        "description": "Mamba State Space Model — linear-time sequence modeling without attention. O(n) complexity, great for very long sequences.",
+        "model_class": "ComposableLLM",
+        "config": {
+            "vocab_size": 32000, "d_model": 512, "n_layers": 12, "n_heads": 8,
+            "max_len": 8192, "norm_type": "rmsnorm",
+        },
+        "default_block": [
+            {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+            {"type": "mamba", "config": {"d_state": 16, "expand": 2}},
+            {"type": "residual", "residual_from": -1},
+        ],
+        "scalable_configs": {
+            "nano": {"d_model": 128, "n_layers": 6},
+            "small": {"d_model": 512, "n_layers": 12},
+            "medium": {"d_model": 1024, "n_layers": 24},
+            "large": {"d_model": 2048, "n_layers": 48},
+        },
+        "training_tips": "No attention → O(n) training. Great for very long sequences (16K+). May underperform transformers on tasks requiring precise retrieval.",
+    },
+    "jamba_scratch": {
+        "name": "Jamba Hybrid (from scratch)",
+        "category": "alternative",
+        "description": "Jamba-style hybrid — alternating Mamba SSM + Transformer attention layers. Best of both worlds: efficiency + retrieval.",
+        "model_class": "ComposableLLM",
+        "config": {
+            "vocab_size": 32000, "d_model": 512, "n_layers": 12, "n_heads": 8,
+            "max_len": 8192, "norm_type": "rmsnorm",
+        },
+        "default_block": [
+            {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+            {"type": "mamba", "config": {"d_state": 16}},
+            {"type": "residual", "residual_from": -1},
+            {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+            {"type": "attention", "config": {}},
+            {"type": "residual", "residual_from": 3},
+            {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+            {"type": "ffn", "config": {"ffn_type": "swiglu"}},
+            {"type": "residual", "residual_from": 5},
+        ],
+        "scalable_configs": {
+            "nano": {"d_model": 128, "n_layers": 4},
+            "small": {"d_model": 512, "n_layers": 8},
+            "medium": {"d_model": 1024, "n_layers": 16},
+            "large": {"d_model": 2048, "n_layers": 32},
+        },
+        "training_tips": "Hybrid models get Mamba's efficiency for most tokens while attention handles retrieval-heavy tasks.",
+    },
+    "rwkv_scratch": {
+        "name": "RWKV (from scratch)",
+        "category": "alternative",
+        "description": "RWKV architecture — RNN-like inference with transformer-like training. O(1) memory per token at inference time.",
+        "model_class": "ComposableLLM",
+        "config": {
+            "vocab_size": 32000, "d_model": 512, "n_layers": 12, "n_heads": 8,
+            "max_len": 8192, "norm_type": "layernorm",
+        },
+        "default_block": [
+            {"type": "rwkv", "config": {}},
+        ],
+        "scalable_configs": {
+            "nano": {"d_model": 128, "n_layers": 6},
+            "small": {"d_model": 512, "n_layers": 12},
+            "medium": {"d_model": 1024, "n_layers": 24},
+        },
+        "training_tips": "Trains like a transformer, runs like an RNN at inference. Great for deployment on edge devices.",
+    },
+    "retnet_scratch": {
+        "name": "RetNet (from scratch)",
+        "category": "alternative",
+        "description": "Retentive Network — multi-scale retention mechanism. Parallel training + recurrent inference + chunk-wise computation.",
+        "model_class": "ComposableLLM",
+        "config": {
+            "vocab_size": 32000, "d_model": 512, "n_layers": 12, "n_heads": 8,
+            "max_len": 4096, "norm_type": "layernorm",
+        },
+        "default_block": [
+            {"type": "norm", "config": {"norm_type": "layernorm"}},
+            {"type": "retention", "config": {}},
+            {"type": "residual", "residual_from": -1},
+            {"type": "norm", "config": {"norm_type": "layernorm"}},
+            {"type": "ffn", "config": {"ffn_type": "standard"}},
+            {"type": "residual", "residual_from": 3},
+        ],
+        "scalable_configs": {
+            "nano": {"d_model": 128, "n_layers": 6},
+            "small": {"d_model": 512, "n_layers": 12},
+            "medium": {"d_model": 1024, "n_layers": 24},
+        },
+        "training_tips": "Three computation modes: parallel (training), recurrent (O(1) inference), chunk-wise (long context).",
+    },
+
+    # ===== MULTIMODAL MODELS =====
+    "gemini_scratch": {
+        "name": "Gemini-style Multimodal (from scratch)",
+        "category": "multimodal",
+        "description": "Google Gemini-style unified multimodal model — text + image + audio + video with perceiver resamplers, MoE layers, and long context. Natively multimodal.",
+        "model_class": "UnifiedMultiModalLLM",
+        "config": {
+            "vocab_size": 65536, "d_model": 512, "n_layers": 12, "n_heads": 8,
+            "n_kv_heads": 4, "max_len": 8192, "norm_type": "rmsnorm",
+            "ffn_type": "swiglu", "use_moe": True, "n_experts": 8, "moe_top_k": 2,
+            "image_size": 224, "patch_size": 16, "n_image_tokens": 64,
+            "n_mels": 80, "n_audio_tokens": 32,
+            "max_frames": 32, "n_video_tokens": 128,
+            "modalities": ["text", "image", "audio", "video"],
+            "resampler_layers": 2,
+        },
+        "scalable_configs": {
+            "nano": {"d_model": 128, "n_layers": 4, "n_heads": 4, "n_kv_heads": 2,
+                     "n_image_tokens": 16, "n_audio_tokens": 8, "n_video_tokens": 32,
+                     "n_experts": 4, "use_moe": False},
+            "small": {"d_model": 512, "n_layers": 12, "n_heads": 8, "n_kv_heads": 4,
+                      "n_image_tokens": 64, "n_audio_tokens": 32, "n_video_tokens": 128,
+                      "n_experts": 8},
+            "medium": {"d_model": 1024, "n_layers": 24, "n_heads": 16, "n_kv_heads": 4,
+                       "n_image_tokens": 128, "n_audio_tokens": 64, "n_video_tokens": 256,
+                       "n_experts": 16},
+            "large": {"d_model": 2048, "n_layers": 32, "n_heads": 32, "n_kv_heads": 8,
+                      "n_image_tokens": 256, "n_audio_tokens": 128, "n_video_tokens": 512,
+                      "n_experts": 16},
+        },
+        "training_tips": "Pre-train each modality encoder separately, then joint training. Use MoE for efficient scaling. Perceiver resamplers keep token count manageable.",
+    },
+    "llava_scratch": {
+        "name": "LLaVA Vision-Language (from scratch)",
+        "category": "multimodal",
+        "description": "LLaVA-style vision-language model — image encoder + projector + LLM decoder. Simple but effective multimodal design.",
+        "model_class": "MultiModalLLM",
+        "config": {
+            "vocab_size": 32000, "d_model": 512, "n_layers": 8, "n_heads": 8,
+            "max_len": 2048, "norm_type": "rmsnorm", "ffn_type": "swiglu",
+            "image_size": 224, "patch_size": 16,
+            "modalities": ["text", "image"],
+        },
+        "scalable_configs": {
+            "nano": {"d_model": 128, "n_layers": 4, "n_heads": 4},
+            "small": {"d_model": 512, "n_layers": 8, "n_heads": 8},
+            "medium": {"d_model": 1024, "n_layers": 16, "n_heads": 16},
+        },
+        "training_tips": "Two-stage: (1) pre-train projector with frozen LLM, (2) fine-tune everything on instruction data.",
+    },
+
+    # ===== VIDEO GENERATION =====
+    "veo3_scratch": {
+        "name": "VeO3-style Video Generation (from scratch)",
+        "category": "video_generation",
+        "description": "VeO3/Sora-style text-to-video diffusion model — 3D VAE encodes video to latent, UNet with temporal attention denoises, text encoder conditions generation.",
+        "model_class": "custom",
+        "architecture": {
+            "text_encoder": {
+                "class": "EncoderDecoderLLM",
+                "description": "Text encoder (frozen or trainable) that produces conditioning embeddings",
+                "config": {"vocab_size": 32000, "d_model": 512, "n_encoder_layers": 6, "n_decoder_layers": 0, "n_heads": 8},
+            },
+            "video_vae": {
+                "class": "VideoVAE",
+                "description": "3D VAE that compresses video to spatial-temporal latent space",
+                "config": {"in_channels": 3, "latent_channels": 4, "base_channels": 64},
+            },
+            "denoiser": {
+                "class": "DiffusionUNet",
+                "description": "UNet with temporal attention that denoises latent video",
+                "config": {"in_channels": 4, "out_channels": 4, "base_channels": 128,
+                           "channel_mults": [1, 2, 4, 8], "n_res_blocks": 2,
+                           "time_dim": 512, "context_dim": 512, "n_heads": 8},
+            },
+            "noise_scheduler": {
+                "class": "NoiseScheduler",
+                "description": "DDPM/DDIM noise schedule for diffusion training",
+                "config": {"n_steps": 1000, "schedule": "cosine"},
+            },
+        },
+        "scalable_configs": {
+            "nano": {"text_encoder.d_model": 128, "denoiser.base_channels": 32},
+            "small": {"text_encoder.d_model": 512, "denoiser.base_channels": 128},
+            "medium": {"text_encoder.d_model": 768, "denoiser.base_channels": 256},
+        },
+        "training_tips": "Train VAE first, then freeze it. Train UNet with noise prediction objective. Use classifier-free guidance for generation quality.",
+    },
+
+    # ===== IMAGE GENERATION =====
+    "stable_diffusion_scratch": {
+        "name": "Stable Diffusion (from scratch)",
+        "category": "image_generation",
+        "description": "Latent Diffusion Model — VAE encodes images to latent space, UNet denoises with text conditioning via cross-attention.",
+        "model_class": "custom",
+        "architecture": {
+            "text_encoder": {
+                "class": "EncoderDecoderLLM",
+                "description": "CLIP-style text encoder for conditioning",
+                "config": {"vocab_size": 49408, "d_model": 512, "n_encoder_layers": 6, "n_decoder_layers": 0, "n_heads": 8},
+            },
+            "vae": {
+                "class": "VAE",
+                "description": "Image VAE (encode to 4-channel latent, decode back)",
+                "config": {"in_channels": 3, "latent_channels": 4, "base_channels": 64},
+            },
+            "denoiser": {
+                "class": "DiffusionUNet",
+                "description": "UNet that predicts noise in latent space",
+                "config": {"in_channels": 4, "out_channels": 4, "base_channels": 128,
+                           "channel_mults": [1, 2, 4, 4], "n_res_blocks": 2,
+                           "time_dim": 512, "context_dim": 512, "n_heads": 8},
+            },
+            "noise_scheduler": {
+                "class": "NoiseScheduler",
+                "config": {"n_steps": 1000, "schedule": "cosine"},
+            },
+        },
+        "scalable_configs": {
+            "nano": {"denoiser.base_channels": 32, "text_encoder.d_model": 128},
+            "small": {"denoiser.base_channels": 128, "text_encoder.d_model": 512},
+            "medium": {"denoiser.base_channels": 256, "text_encoder.d_model": 768},
+        },
+        "training_tips": "Train VAE first on reconstruction. Then train UNet with frozen VAE. Use DDIM for fast sampling (50 steps vs 1000).",
+    },
+
+    # ===== CUSTOM / EXPERIMENTAL =====
+    "nano_banana": {
+        "name": "Nano Banana (custom efficient model)",
+        "category": "experimental",
+        "description": "Ultra-compact custom architecture — designed for maximum capability per parameter. Uses hybrid Mamba+Attention, MoE, and aggressive weight sharing. Build your own novel architecture!",
+        "model_class": "ComposableLLM",
+        "config": {
+            "vocab_size": 8000, "d_model": 256, "n_layers": 8, "n_heads": 4,
+            "n_kv_heads": 2, "max_len": 2048, "norm_type": "rmsnorm",
+            "tie_weights": True,
+        },
+        "default_block": [
+            {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+            {"type": "mamba", "config": {"d_state": 8, "expand": 1}},
+            {"type": "residual", "residual_from": -1},
+            {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+            {"type": "attention", "config": {"n_heads": 4, "n_kv_heads": 2}},
+            {"type": "residual", "residual_from": 3},
+            {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+            {"type": "moe", "config": {"n_experts": 4, "top_k": 1}},
+            {"type": "residual", "residual_from": 5},
+        ],
+        "scalable_configs": {
+            "pico": {"d_model": 64, "n_layers": 4, "n_heads": 2, "vocab_size": 4000},
+            "nano": {"d_model": 128, "n_layers": 6, "n_heads": 4, "vocab_size": 8000},
+            "micro": {"d_model": 256, "n_layers": 8, "n_heads": 4, "vocab_size": 8000},
+            "small": {"d_model": 512, "n_layers": 12, "n_heads": 8, "vocab_size": 16000},
+        },
+        "training_tips": "Great for research on efficient architectures. Hybrid Mamba+Attention+MoE maximizes capability per FLOP. Try modifying the block design!",
+    },
+    "custom_from_scratch": {
+        "name": "Custom Architecture (blank canvas)",
+        "category": "experimental",
+        "description": "Start from scratch — define your own block design using any available components. Mix attention, SSMs, MoE, convolutions, and custom code. This is your playground.",
+        "model_class": "ComposableLLM",
+        "config": {
+            "vocab_size": 32000, "d_model": 256, "n_layers": 6, "n_heads": 4,
+            "max_len": 1024, "norm_type": "rmsnorm",
+        },
+        "default_block": [
+            {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+            {"type": "attention", "config": {}},
+            {"type": "residual", "residual_from": -1},
+            {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+            {"type": "ffn", "config": {"ffn_type": "swiglu"}},
+            {"type": "residual", "residual_from": 2},
+        ],
+        "scalable_configs": {},
+        "training_tips": "Use the composable block system to mix any components. Available step types: norm, attention, ffn, moe, mamba, rwkv, retention, hyena, xlstm, gated_recurrence, sliding_window_attention, linear_attention, alibi_attention, parallel, cross_attention, conv1d, custom_code, custom_formula.",
+    },
+
+    # ===== EFFICIENT / ADAPTIVE =====
+    "adaptive_depth_scratch": {
+        "name": "Adaptive Depth LLM (from scratch)",
+        "category": "efficient",
+        "description": "LLM with early exit — skips remaining layers when confident. Faster inference for easy inputs, full depth for hard ones.",
+        "model_class": "AdaptiveDepthLLM",
+        "config": {
+            "vocab_size": 32000, "d_model": 512, "n_layers": 12, "n_heads": 8,
+            "max_len": 2048, "norm_type": "rmsnorm", "ffn_type": "swiglu",
+            "exit_interval": 3, "exit_threshold": 0.9,
+        },
+        "scalable_configs": {
+            "nano": {"d_model": 128, "n_layers": 6, "n_heads": 4, "exit_interval": 2},
+            "small": {"d_model": 512, "n_layers": 12, "n_heads": 8, "exit_interval": 3},
+            "medium": {"d_model": 1024, "n_layers": 24, "n_heads": 16, "exit_interval": 4},
+        },
+        "training_tips": "Train with auxiliary losses at exit points. At inference, increase exit_threshold for quality, decrease for speed.",
+    },
+}
+
+
+def get_blueprint_categories() -> dict:
+    """Return blueprints organized by category."""
+    categories = {}
+    for key, bp in MODEL_BLUEPRINTS.items():
+        cat = bp.get("category", "other")
+        if cat not in categories:
+            categories[cat] = {}
+        categories[cat][key] = {
+            "name": bp["name"],
+            "description": bp["description"],
+            "model_class": bp["model_class"],
+            "scalable_configs": list(bp.get("scalable_configs", {}).keys()),
+        }
+    return categories

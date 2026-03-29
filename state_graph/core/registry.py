@@ -21,6 +21,7 @@ class Registry:
     _losses: dict[str, type[nn.Module] | Callable] = {}
     _optimizers: dict[str, type[torch.optim.Optimizer]] = {}
     _custom_formulas: dict[str, Callable] = {}
+    _layer_categories: dict[str, list[str]] = {}
 
     @classmethod
     def reset(cls) -> None:
@@ -29,12 +30,13 @@ class Registry:
         cls._losses = {}
         cls._optimizers = {}
         cls._custom_formulas = {}
+        cls._layer_categories = {}
         cls._register_defaults()
 
     @classmethod
     def _register_defaults(cls) -> None:
-        # Built-in layers
-        cls._layers.update({
+        # Built-in layers (with categories)
+        _core = {
             "Linear": nn.Linear,
             "Conv1d": nn.Conv1d,
             "Conv2d": nn.Conv2d,
@@ -42,6 +44,8 @@ class Registry:
             "ConvTranspose2d": nn.ConvTranspose2d,
             "BatchNorm1d": nn.BatchNorm1d,
             "BatchNorm2d": nn.BatchNorm2d,
+            "GroupNorm": nn.GroupNorm,
+            "InstanceNorm2d": nn.InstanceNorm2d,
             "LayerNorm": nn.LayerNorm,
             "Dropout": nn.Dropout,
             "Dropout2d": nn.Dropout2d,
@@ -50,10 +54,15 @@ class Registry:
             "GRU": nn.GRU,
             "MultiheadAttention": nn.MultiheadAttention,
             "Flatten": nn.Flatten,
+            "AdaptiveAvgPool1d": nn.AdaptiveAvgPool1d,
             "AdaptiveAvgPool2d": nn.AdaptiveAvgPool2d,
+            "MaxPool1d": nn.MaxPool1d,
             "MaxPool2d": nn.MaxPool2d,
             "AvgPool2d": nn.AvgPool2d,
-        })
+        }
+        cls._layers.update(_core)
+        for name in _core:
+            cls.register_layer(name, _core[name], category="Core")
 
         # Built-in activations
         cls._activations.update({
@@ -81,6 +90,10 @@ class Registry:
             "HuberLoss": nn.HuberLoss,
             "KLDivLoss": nn.KLDivLoss,
             "CosineEmbeddingLoss": nn.CosineEmbeddingLoss,
+            "CTCLoss": nn.CTCLoss,
+            "TripletMarginLoss": nn.TripletMarginLoss,
+            "MultiMarginLoss": nn.MultiMarginLoss,
+            "MarginRankingLoss": nn.MarginRankingLoss,
         })
 
         # Built-in optimizers
@@ -92,9 +105,180 @@ class Registry:
             "Adagrad": torch.optim.Adagrad,
         })
 
+        cls._register_custom_layers()
+
     @classmethod
-    def register_layer(cls, name: str, layer_cls: type[nn.Module]) -> None:
+    def _register_custom_layers(cls) -> None:
+        """Register custom layers, LLM layers, and advanced components.
+
+        Uses lazy imports to avoid loading heavy dependencies at startup.
+        """
+        try:
+            from state_graph.layers.custom import (
+                ResidualBlock, SqueezeExcite, GatedLinearUnit, SwishLinear,
+                TransformerBlock, PositionalEncoding, TokenEmbedding, SequencePool,
+                PatchEmbed, DepthwiseSeparableConv, ChannelAttention,
+                UpsampleBlock, GlobalAvgPool, Reshape,
+                MelSpectrogram, AudioConvBlock, Transpose,
+                Conv3dBlock, TemporalPool,
+                SinusoidalTimestepEmbed, ConditionalBatchNorm2d,
+                ResConvBlock, DownBlock, UpBlock,
+                SelectiveScan, MambaBlock, RWKVBlock, RetentionLayer, RetNetBlock,
+                HyenaOperator, HyenaBlock, SLSTMCell, XLSTM, GatedLinearRecurrence,
+                # New components
+                ResNetBlock, ConvNeXtBlock, MBConvBlock, VisionEncoder,
+                DiffusionTimestepBlock, SpatialAttentionBlock, CrossAttentionBlock,
+                DiffusionUNet, VAE,
+                TemporalAttention, TemporalConv3d, VideoVAE,
+                PerceiverResampler, DistillationWrapper,
+            )
+
+            # Transformer & Building Blocks
+            _transformer = {
+                "TransformerBlock": TransformerBlock,
+                "PositionalEncoding": PositionalEncoding,
+                "TokenEmbedding": TokenEmbedding,
+                "SequencePool": SequencePool,
+                "ResidualBlock": ResidualBlock,
+                "SqueezeExcite": SqueezeExcite,
+                "GatedLinearUnit": GatedLinearUnit,
+                "SwishLinear": SwishLinear,
+            }
+            for name, layer in _transformer.items():
+                cls.register_layer(name, layer, category="Transformer")
+
+            # Vision
+            _vision = {
+                "PatchEmbed": PatchEmbed,
+                "DepthwiseSeparableConv": DepthwiseSeparableConv,
+                "ChannelAttention": ChannelAttention,
+                "UpsampleBlock": UpsampleBlock,
+                "GlobalAvgPool": GlobalAvgPool,
+                "Reshape": Reshape,
+                "ResNetBlock": ResNetBlock,
+                "ConvNeXtBlock": ConvNeXtBlock,
+                "MBConvBlock": MBConvBlock,
+                "VisionEncoder": VisionEncoder,
+            }
+            for name, layer in _vision.items():
+                cls.register_layer(name, layer, category="Vision")
+
+            # Audio
+            _audio = {
+                "MelSpectrogram": MelSpectrogram,
+                "AudioConvBlock": AudioConvBlock,
+                "Transpose": Transpose,
+            }
+            for name, layer in _audio.items():
+                cls.register_layer(name, layer, category="Audio")
+
+            # Video
+            _video = {
+                "Conv3dBlock": Conv3dBlock,
+                "TemporalPool": TemporalPool,
+                "TemporalAttention": TemporalAttention,
+                "TemporalConv3d": TemporalConv3d,
+                "VideoVAE": VideoVAE,
+            }
+            for name, layer in _video.items():
+                cls.register_layer(name, layer, category="Video")
+
+            # Diffusion
+            _diffusion = {
+                "SinusoidalTimestepEmbed": SinusoidalTimestepEmbed,
+                "ConditionalBatchNorm2d": ConditionalBatchNorm2d,
+                "ResConvBlock": ResConvBlock,
+                "DownBlock": DownBlock,
+                "UpBlock": UpBlock,
+                "DiffusionTimestepBlock": DiffusionTimestepBlock,
+                "SpatialAttentionBlock": SpatialAttentionBlock,
+                "CrossAttentionBlock": CrossAttentionBlock,
+                "DiffusionUNet": DiffusionUNet,
+                "VAE": VAE,
+            }
+            for name, layer in _diffusion.items():
+                cls.register_layer(name, layer, category="Diffusion")
+
+            # State-Space Models
+            _ssm = {
+                "SelectiveScan": SelectiveScan,
+                "MambaBlock": MambaBlock,
+                "RWKVBlock": RWKVBlock,
+                "RetentionLayer": RetentionLayer,
+                "RetNetBlock": RetNetBlock,
+                "HyenaOperator": HyenaOperator,
+                "HyenaBlock": HyenaBlock,
+                "SLSTMCell": SLSTMCell,
+                "XLSTM": XLSTM,
+                "GatedLinearRecurrence": GatedLinearRecurrence,
+            }
+            for name, layer in _ssm.items():
+                cls.register_layer(name, layer, category="SSM")
+
+            # Multimodal & Training
+            _multimodal = {
+                "PerceiverResampler": PerceiverResampler,
+                "DistillationWrapper": DistillationWrapper,
+            }
+            for name, layer in _multimodal.items():
+                cls.register_layer(name, layer, category="Multimodal")
+
+        except ImportError:
+            pass  # Custom layers not available
+
+        try:
+            from state_graph.layers.llm import (
+                RMSNorm, LLMAttention, SwiGLUFFN, GeGLUFFN, ReGLUFFN, StandardFFN,
+                MoELayer, LLMDecoderBlock, LLMModel,
+                SlidingWindowAttention, LinearAttention, ALiBiAttention,
+                ComposableBlock, ComposableLLM, ParallelBranch,
+                EncoderBlock, DecoderBlockWithCrossAttn, EncoderDecoderLLM,
+                EarlyExitClassifier, AdaptiveDepthLLM,
+                PatchEmbedding, AudioEmbedding, ModalityProjector,
+                MultiModalLLM, VideoEmbedding, UnifiedMultiModalLLM,
+            )
+
+            _llm = {
+                "RMSNorm": RMSNorm,
+                "LLMAttention": LLMAttention,
+                "SwiGLUFFN": SwiGLUFFN,
+                "GeGLUFFN": GeGLUFFN,
+                "ReGLUFFN": ReGLUFFN,
+                "StandardFFN": StandardFFN,
+                "MoELayer": MoELayer,
+                "LLMDecoderBlock": LLMDecoderBlock,
+                "LLMModel": LLMModel,
+                "SlidingWindowAttention": SlidingWindowAttention,
+                "LinearAttention": LinearAttention,
+                "ALiBiAttention": ALiBiAttention,
+                "ComposableBlock": ComposableBlock,
+                "ComposableLLM": ComposableLLM,
+                "ParallelBranch": ParallelBranch,
+                "EncoderBlock": EncoderBlock,
+                "DecoderBlockWithCrossAttn": DecoderBlockWithCrossAttn,
+                "EncoderDecoderLLM": EncoderDecoderLLM,
+                "EarlyExitClassifier": EarlyExitClassifier,
+                "AdaptiveDepthLLM": AdaptiveDepthLLM,
+                "PatchEmbedding": PatchEmbedding,
+                "AudioEmbedding": AudioEmbedding,
+                "ModalityProjector": ModalityProjector,
+                "MultiModalLLM": MultiModalLLM,
+                "VideoEmbedding": VideoEmbedding,
+                "UnifiedMultiModalLLM": UnifiedMultiModalLLM,
+            }
+            for name, layer in _llm.items():
+                cls.register_layer(name, layer, category="LLM")
+
+        except ImportError:
+            pass  # LLM layers not available
+
+    @classmethod
+    def register_layer(cls, name: str, layer_cls: type[nn.Module], category: str = "General") -> None:
         cls._layers[name] = layer_cls
+        if category not in cls._layer_categories:
+            cls._layer_categories[category] = []
+        if name not in cls._layer_categories[category]:
+            cls._layer_categories[category].append(name)
 
     @classmethod
     def register_activation(cls, name: str, act: type[nn.Module] | Callable) -> None:
@@ -184,12 +368,18 @@ class Registry:
         return sorted(cls._optimizers.keys())
 
     @classmethod
-    def list_all(cls) -> dict[str, list[str]]:
+    def list_layer_categories(cls) -> dict[str, list[str]]:
+        """Return layers organized by category."""
+        return {cat: sorted(names) for cat, names in cls._layer_categories.items()}
+
+    @classmethod
+    def list_all(cls) -> dict[str, list[str] | dict]:
         return {
             "layers": cls.list_layers(),
             "activations": cls.list_activations(),
             "losses": cls.list_losses(),
             "optimizers": cls.list_optimizers(),
+            "layer_categories": cls.list_layer_categories(),
         }
 
 

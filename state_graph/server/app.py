@@ -26,6 +26,18 @@ from state_graph.core.data import DataManager
 # Import custom layers to register them
 import state_graph.layers.custom  # noqa: F401
 import state_graph.layers.llm  # noqa: F401
+try:
+    import state_graph.layers.vision_advanced  # noqa: F401
+except ImportError:
+    pass
+try:
+    import state_graph.layers.diffusion_advanced  # noqa: F401
+except ImportError:
+    pass
+try:
+    import state_graph.layers.audio_advanced  # noqa: F401
+except ImportError:
+    pass
 
 app = FastAPI(title="StateGraph", version="0.4.0")
 engine = TrainingEngine()
@@ -1553,6 +1565,1329 @@ async def validate_custom_component(body: dict[str, Any]):
             return {"status": "error", "message": str(e)}
 
     return {"status": "error", "message": f"Unknown type: {comp_type}"}
+
+
+@app.post("/api/llm/novel/validate")
+async def validate_novel_architecture(body: dict[str, Any]):
+    """Validate a novel block design by building, running forward pass, and benchmarking.
+
+    Body: {
+        block_design: [...steps...],
+        d_model: 128,
+        n_heads: 4,
+        vocab_size: 1000,
+        n_layers: 2,
+        seq_len: 32,
+        benchmark: true,  // run speed comparison against standard Llama block
+    }
+    """
+    from state_graph.layers.llm import ComposableBlock, ComposableLLM, BLOCK_DESIGNS
+    import time
+
+    steps = body.get("block_design", [])
+    d_model = body.get("d_model", 128)
+    n_heads = body.get("n_heads", 4)
+    n_kv_heads = body.get("n_kv_heads")
+    vocab_size = body.get("vocab_size", 1000)
+    n_layers = body.get("n_layers", 2)
+    seq_len = body.get("seq_len", 32)
+    do_benchmark = body.get("benchmark", False)
+
+    if not steps:
+        return {"status": "error", "message": "No block_design steps provided"}
+
+    # 1. Validate: build single block
+    try:
+        block = ComposableBlock(
+            d_model=d_model, steps=steps, n_heads=n_heads,
+            n_kv_heads=n_kv_heads, max_len=512,
+        )
+    except Exception as e:
+        return {"status": "error", "stage": "block_build", "message": str(e)}
+
+    # 2. Test forward pass
+    try:
+        x = torch.randn(1, seq_len, d_model)
+        out = block(x)
+        if out.shape != x.shape:
+            return {"status": "warning", "message": f"Output shape {list(out.shape)} != input shape {list(x.shape)}. Block may not stack correctly.",
+                    "output_shape": list(out.shape), "block_params": sum(p.numel() for p in block.parameters())}
+    except Exception as e:
+        return {"status": "error", "stage": "forward_pass", "message": str(e)}
+
+    block_params = sum(p.numel() for p in block.parameters())
+
+    # 3. Build full model
+    try:
+        model = ComposableLLM(
+            vocab_size=vocab_size, d_model=d_model, n_layers=n_layers,
+            n_heads=n_heads, n_kv_heads=n_kv_heads, max_len=512,
+            default_block=steps,
+        )
+        ids = torch.randint(0, vocab_size, (1, seq_len))
+        model_out = model(ids, labels=ids)
+        total_params = sum(p.numel() for p in model.parameters())
+    except Exception as e:
+        return {"status": "error", "stage": "model_build", "message": str(e)}
+
+    result = {
+        "status": "valid",
+        "block_params": block_params,
+        "total_params": total_params,
+        "total_params_M": f"{total_params / 1e6:.2f}M",
+        "output_shape": list(out.shape),
+        "loss": model_out["loss"].item() if model_out.get("loss") is not None else None,
+        "n_steps": len(steps),
+        "step_types": [s.get("type", "?") for s in steps],
+    }
+
+    # 4. Benchmark against baselines
+    if do_benchmark:
+        benchmarks = {}
+        for baseline_name in ["llama", "mamba", "minimal"]:
+            baseline_steps = BLOCK_DESIGNS.get(baseline_name, [])
+            if not baseline_steps:
+                continue
+            try:
+                baseline_model = ComposableLLM(
+                    vocab_size=vocab_size, d_model=d_model, n_layers=n_layers,
+                    n_heads=n_heads, max_len=512, default_block=baseline_steps,
+                )
+                baseline_params = sum(p.numel() for p in baseline_model.parameters())
+
+                # Speed test
+                ids_bench = torch.randint(0, vocab_size, (2, seq_len))
+                start = time.time()
+                for _ in range(5):
+                    baseline_model(ids_bench)
+                baseline_time = (time.time() - start) / 5
+
+                start = time.time()
+                for _ in range(5):
+                    model(ids_bench)
+                novel_time = (time.time() - start) / 5
+
+                benchmarks[baseline_name] = {
+                    "baseline_params": baseline_params,
+                    "baseline_ms": round(baseline_time * 1000, 2),
+                    "novel_ms": round(novel_time * 1000, 2),
+                    "speedup": round(baseline_time / max(novel_time, 1e-9), 2),
+                    "param_ratio": round(total_params / max(baseline_params, 1), 2),
+                }
+            except Exception:
+                continue
+
+        result["benchmarks"] = benchmarks
+
+    return result
+
+
+@app.post("/api/llm/novel/experiment")
+async def novel_architecture_experiment(body: dict[str, Any]):
+    """Run a quick experiment: build model, train briefly, and report metrics.
+
+    Body: {
+        block_design: [...steps...],
+        d_model: 128, n_heads: 4, vocab_size: 1000, n_layers: 2,
+        text: "training text...",
+        train_steps: 50,
+        learning_rate: 1e-3,
+    }
+    """
+    from state_graph.layers.llm import ComposableLLM
+
+    steps = body.get("block_design", [])
+    if not steps:
+        return {"status": "error", "message": "No block_design provided"}
+
+    d_model = body.get("d_model", 128)
+    n_heads = body.get("n_heads", 4)
+    vocab_size = body.get("vocab_size", 1000)
+    n_layers = body.get("n_layers", 2)
+    max_len = body.get("max_len", 64)
+    text = body.get("text", "")
+    train_steps = body.get("train_steps", 50)
+    lr = body.get("learning_rate", 1e-3)
+
+    if len(text) < 100:
+        return {"status": "error", "message": "Need at least 100 characters of text"}
+
+    try:
+        model = ComposableLLM(
+            vocab_size=vocab_size, d_model=d_model, n_layers=n_layers,
+            n_heads=n_heads, max_len=max_len, default_block=steps,
+        ).to(engine.device)
+    except Exception as e:
+        return {"status": "error", "message": f"Build failed: {e}"}
+
+    # Quick char-level tokenization
+    chars = sorted(set(text))
+    c2i = {c: i for i, c in enumerate(chars)}
+    encoded = torch.tensor([c2i[c] for c in text], dtype=torch.long)
+    if len(chars) > vocab_size:
+        return {"status": "error", "message": f"Text has {len(chars)} unique chars but vocab_size={vocab_size}"}
+
+    # Create sequences
+    n_seqs = (len(encoded) - 1) // max_len
+    if n_seqs < 2:
+        return {"status": "error", "message": "Not enough text for training sequences"}
+    trim = n_seqs * max_len + 1
+    data = encoded[:trim]
+    input_ids = data[:-1].view(n_seqs, max_len).to(engine.device)
+    labels = data[1:].view(n_seqs, max_len).to(engine.device)
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    total_params = sum(p.numel() for p in model.parameters())
+
+    # Train
+    model.train()
+    losses = []
+    import time
+    start = time.time()
+    for step in range(train_steps):
+        idx = step % n_seqs
+        out = model(input_ids[idx:idx+1], labels=labels[idx:idx+1])
+        loss = out["loss"]
+        optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+        losses.append(loss.item())
+    elapsed = time.time() - start
+
+    return {
+        "status": "ok",
+        "total_params": total_params,
+        "total_params_M": f"{total_params / 1e6:.2f}M",
+        "train_steps": train_steps,
+        "initial_loss": round(losses[0], 4),
+        "final_loss": round(losses[-1], 4),
+        "loss_reduction": round(losses[0] - losses[-1], 4),
+        "loss_history": [round(l, 4) for l in losses[::max(1, len(losses)//20)]],
+        "time_seconds": round(elapsed, 2),
+        "steps_per_second": round(train_steps / elapsed, 1),
+        "step_types": [s.get("type", "?") for s in steps],
+    }
+
+
+@app.get("/api/llm/novel/templates")
+async def novel_architecture_templates():
+    """Return starter templates for inventing novel architectures.
+
+    Each template is a research direction with a starting block design
+    and suggestions for what to experiment with.
+    """
+    return {"templates": {
+        "sparse_attention_ssm": {
+            "name": "Sparse Attention + SSM Fusion",
+            "description": "Combine sparse/windowed attention for precision with Mamba SSM for long-range. Research question: what's the optimal ratio?",
+            "block_design": [
+                {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+                {"type": "sliding_window_attention", "config": {"window_size": 256}},
+                {"type": "residual", "residual_from": -1},
+                {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+                {"type": "mamba", "config": {"d_state": 16, "expand": 2}},
+                {"type": "residual", "residual_from": 3},
+                {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+                {"type": "ffn", "config": {"ffn_type": "swiglu"}},
+                {"type": "residual", "residual_from": 5},
+            ],
+            "experiments": [
+                "Try window_size: 64, 128, 256, 512 — which gives best quality/speed?",
+                "Swap order: SSM first, then attention — does it matter?",
+                "Replace SwiGLU with MoE — does expert specialization help?",
+                "Use linear_attention instead of sliding_window — faster but how much quality loss?",
+            ],
+        },
+        "parallel_everything": {
+            "name": "Fully Parallel Block",
+            "description": "Run attention, SSM, and convolution in parallel then merge. Maximizes information flow per layer.",
+            "block_design": [
+                {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+                {"type": "parallel", "config": {
+                    "branch_a": {"type": "attention", "config": {}},
+                    "branch_b": {"type": "mamba", "config": {"d_state": 16}},
+                    "merge": "gate",
+                }},
+                {"type": "residual", "residual_from": -1},
+                {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+                {"type": "ffn", "config": {"ffn_type": "swiglu"}},
+                {"type": "residual", "residual_from": 3},
+            ],
+            "experiments": [
+                "Try merge modes: add vs gate vs concat — which preserves most info?",
+                "Add a third parallel branch with conv1d",
+                "Use MoE as the FFN to add expert routing",
+                "Make different layers use different parallel combos",
+            ],
+        },
+        "recursive_depth": {
+            "name": "Recursive / Shared-Weight Layers",
+            "description": "Same block repeated with shared weights — like Universal Transformer. More compute per parameter.",
+            "block_design": [
+                {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+                {"type": "attention", "config": {}},
+                {"type": "residual", "residual_from": -1},
+                {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+                {"type": "ffn", "config": {"ffn_type": "swiglu"}},
+                {"type": "residual", "residual_from": 2},
+            ],
+            "use_tip": "Build with n_layers=1 then in custom code, loop through the same block N times. Or use block_designs to repeat the same design.",
+            "experiments": [
+                "Compare: 12 unique layers vs 4 layers × 3 passes each (same params, more compute)",
+                "Add layer-specific scaling: multiply by learned alpha per pass",
+                "Combine with early exit — exit when representation stabilizes",
+            ],
+        },
+        "gated_expert_ssm": {
+            "name": "Gated Expert SSM",
+            "description": "Route tokens to specialized SSM experts — each expert handles different sequence patterns.",
+            "block_design": [
+                {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+                {"type": "moe", "config": {"n_experts": 4, "top_k": 1}},
+                {"type": "residual", "residual_from": -1},
+                {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+                {"type": "mamba", "config": {"d_state": 32, "expand": 1}},
+                {"type": "residual", "residual_from": 3},
+            ],
+            "experiments": [
+                "MoE first vs Mamba first — does order matter for specialization?",
+                "Increase d_state to 32, 64 — does larger state help experts?",
+                "Add attention every 4th layer for global information exchange",
+                "Try top_k=2 vs top_k=1 — more experts per token vs specialization",
+            ],
+        },
+        "multi_scale_hybrid": {
+            "name": "Multi-Scale Processing",
+            "description": "Different components at different scales: local conv, medium attention, global SSM.",
+            "block_design": [
+                {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+                {"type": "conv1d", "config": {"kernel_size": 3, "groups": 1}},
+                {"type": "activation", "config": {"name": "silu"}},
+                {"type": "residual", "residual_from": -1},
+                {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+                {"type": "sliding_window_attention", "config": {"window_size": 128}},
+                {"type": "residual", "residual_from": 4},
+                {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+                {"type": "mamba", "config": {"d_state": 16}},
+                {"type": "residual", "residual_from": 6},
+                {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+                {"type": "ffn", "config": {"ffn_type": "swiglu"}},
+                {"type": "residual", "residual_from": 9},
+            ],
+            "experiments": [
+                "Which scale matters most? Remove one component at a time",
+                "Try conv kernel sizes: 3, 7, 15 — larger = more local context",
+                "Replace Mamba with Hyena for a different long-range mechanism",
+                "Use this for only deep layers, use simple attention for early layers",
+            ],
+        },
+        "custom_code_layer": {
+            "name": "Write Your Own Layer",
+            "description": "Define a completely new mechanism in Python. Full access to PyTorch + all StateGraph primitives.",
+            "block_design": [
+                {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+                {"type": "custom_code", "config": {
+                    "code": "class CustomModule(nn.Module):\n    def __init__(self, d_model, **kwargs):\n        super().__init__()\n        # YOUR NOVEL MECHANISM HERE\n        # Available: torch, nn, F, math, RMSNorm, LLMAttention,\n        #   SwiGLUFFN, MoELayer, SelectiveScan, PerceiverResampler, etc.\n        self.gate = nn.Linear(d_model, d_model)\n        self.transform = nn.Linear(d_model, d_model)\n        self.mix = nn.Linear(d_model * 2, d_model)\n\n    def forward(self, x):\n        # Example: gated cross-dimensional mixing\n        g = torch.sigmoid(self.gate(x))\n        t = F.silu(self.transform(x))\n        mixed = self.mix(torch.cat([g * x, (1-g) * t], dim=-1))\n        return mixed\n",
+                }},
+                {"type": "residual", "residual_from": -1},
+                {"type": "norm", "config": {"norm_type": "rmsnorm"}},
+                {"type": "ffn", "config": {"ffn_type": "swiglu"}},
+                {"type": "residual", "residual_from": 3},
+            ],
+            "experiments": [
+                "Replace the example with your own attention variant",
+                "Try combining multiple existing primitives in a new way",
+                "Implement a novel gating mechanism",
+                "Create a differentiable memory module",
+            ],
+        },
+    }}
+
+
+@app.post("/api/llm/novel/model-from-code")
+async def build_model_from_code(body: dict[str, Any]):
+    """Build an entirely custom model from Python code and load into the training engine.
+
+    The code must define a class with:
+    - __init__(self, vocab_size, d_model, **kwargs)
+    - forward(self, input_ids, labels=None) -> dict with "logits" and "loss"
+    - Optionally: generate(), count_parameters()
+
+    Available in code: torch, nn, F, math, + all StateGraph primitives (RMSNorm,
+    LLMAttention, SwiGLUFFN, MoELayer, SelectiveScan, PerceiverResampler, etc.)
+
+    Body: {
+        code: "class MyModel(nn.Module): ...",
+        vocab_size: 32000,
+        d_model: 512,
+        kwargs: {},  // extra init args
+    }
+    """
+    code = body.get("code", "")
+    vocab_size = body.get("vocab_size", 32000)
+    d_model = body.get("d_model", 512)
+    extra_kwargs = body.get("kwargs", {})
+
+    if not code.strip():
+        return {"status": "error", "message": "No code provided"}
+
+    import torch.nn as tnn
+
+    # Build safe execution environment with all primitives
+    safe_globals = {
+        "torch": torch, "nn": tnn, "F": torch.nn.functional,
+        "math": __import__("math"), "Optional": __import__("typing").Optional,
+    }
+
+    # Inject all custom layer primitives
+    try:
+        import state_graph.layers.custom as _custom
+        for attr in dir(_custom):
+            obj = getattr(_custom, attr)
+            if isinstance(obj, type) and issubclass(obj, tnn.Module):
+                safe_globals[attr] = obj
+            elif attr == "NoiseScheduler":
+                safe_globals[attr] = obj
+    except ImportError:
+        pass
+
+    # Inject LLM components
+    try:
+        from state_graph.layers.llm import (
+            RMSNorm, LLMAttention, SwiGLUFFN, GeGLUFFN, ReGLUFFN, StandardFFN,
+            MoELayer, MoERouter, LLMDecoderBlock, RotaryPositionalEmbedding,
+            apply_rotary_pos_emb, SlidingWindowAttention, LinearAttention,
+            ALiBiAttention, ComposableBlock, ParallelBranch,
+            EncoderBlock, DecoderBlockWithCrossAttn,
+            PatchEmbedding, AudioEmbedding, ModalityProjector,
+        )
+        for name, obj in locals().items():
+            if isinstance(obj, type):
+                safe_globals[name] = obj
+            elif callable(obj):
+                safe_globals[name] = obj
+    except ImportError:
+        pass
+
+    # Execute the code
+    local_ns: dict = {}
+    try:
+        exec(code, safe_globals, local_ns)  # noqa: S102
+    except Exception as e:
+        return {"status": "error", "stage": "parse", "message": f"Code execution error: {e}"}
+
+    # Find the model class
+    model_cls = None
+    for obj in local_ns.values():
+        if isinstance(obj, type) and issubclass(obj, tnn.Module) and obj is not tnn.Module:
+            model_cls = obj
+            break
+
+    if model_cls is None:
+        return {"status": "error", "stage": "class", "message": "Code must define an nn.Module subclass"}
+
+    # Instantiate
+    try:
+        model = model_cls(vocab_size=vocab_size, d_model=d_model, **extra_kwargs)
+    except TypeError as e:
+        # Try without keyword args
+        try:
+            model = model_cls(vocab_size, d_model, **extra_kwargs)
+        except Exception:
+            return {"status": "error", "stage": "init", "message": f"Failed to instantiate: {e}"}
+
+    # Validate forward pass
+    try:
+        test_ids = torch.randint(0, min(vocab_size, 100), (1, 16))
+        out = model(test_ids)
+        if not isinstance(out, dict) or "logits" not in out:
+            return {"status": "error", "stage": "forward",
+                    "message": "forward() must return a dict with 'logits' key. Got: " + str(type(out))}
+    except Exception as e:
+        return {"status": "error", "stage": "forward", "message": f"Forward pass failed: {e}"}
+
+    # Validate with labels
+    try:
+        out_with_labels = model(test_ids, labels=test_ids)
+        has_loss = out_with_labels.get("loss") is not None
+    except Exception:
+        has_loss = False
+
+    # Load into engine
+    model = model.to(engine.device)
+    engine.model = model
+    engine.model_source = "llm"
+    engine._llm_config = {
+        "model_class": "custom_code",
+        "vocab_size": vocab_size,
+        "d_model": d_model,
+        "code": code,
+    }
+
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    # Check for generate method
+    has_generate = hasattr(model, "generate") and callable(model.generate)
+
+    return {
+        "status": "ok",
+        "model_class": model_cls.__name__,
+        "parameters": {
+            "total": total, "trainable": trainable,
+            "total_M": f"{total / 1e6:.1f}M",
+        },
+        "has_loss": has_loss,
+        "has_generate": has_generate,
+        "output_shape": list(out["logits"].shape),
+        "message": f"Custom model '{model_cls.__name__}' loaded: {total/1e6:.1f}M params. "
+                   + ("Loss function: OK. " if has_loss else "WARNING: No loss from forward(labels=...). ")
+                   + ("Generation: OK." if has_generate else "No generate() method."),
+    }
+
+
+@app.post("/api/llm/novel/custom-loss")
+async def set_custom_loss(body: dict[str, Any]):
+    """Set a custom loss function for training.
+
+    Supports two modes:
+    1. Formula: "F.cross_entropy(logits.view(-1, vocab_size), labels.view(-1)) + 0.1 * F.mse_loss(logits, ...)"
+    2. Code: Full Python class definition
+
+    Formula vars: logits, labels, vocab_size, torch, F, math, model
+    Code must define: class CustomLoss(nn.Module) with forward(self, logits, labels, **kwargs) -> tensor
+
+    Body: {
+        mode: "formula" | "code",
+        formula: "...",   // for formula mode
+        code: "...",      // for code mode
+    }
+    """
+    mode = body.get("mode", "formula")
+
+    if mode == "formula":
+        formula = body.get("formula", "")
+        if not formula:
+            return {"status": "error", "message": "No formula provided"}
+
+        # Validate
+        try:
+            import torch.nn as tnn
+            logits = torch.randn(1, 8, 100)
+            labels = torch.randint(0, 100, (1, 8))
+            safe = {"torch": torch, "F": torch.nn.functional, "math": __import__("math"),
+                    "logits": logits, "labels": labels, "vocab_size": 100}
+            result = eval(formula, safe)  # noqa: S307
+            if not isinstance(result, torch.Tensor):
+                return {"status": "error", "message": f"Formula must return a tensor, got {type(result)}"}
+        except Exception as e:
+            return {"status": "error", "message": f"Formula validation failed: {e}"}
+
+        engine._custom_loss = {"mode": "formula", "formula": formula}
+        return {"status": "ok", "mode": "formula", "formula": formula,
+                "message": "Custom loss formula set. Will be used in next training run."}
+
+    elif mode == "code":
+        code = body.get("code", "")
+        if not code:
+            return {"status": "error", "message": "No code provided"}
+
+        try:
+            import torch.nn as tnn
+            safe_globals = {"torch": torch, "nn": tnn, "F": torch.nn.functional,
+                           "math": __import__("math")}
+            local_ns: dict = {}
+            exec(code, safe_globals, local_ns)  # noqa: S102
+
+            loss_cls = None
+            for obj in local_ns.values():
+                if isinstance(obj, type) and issubclass(obj, tnn.Module) and obj is not tnn.Module:
+                    loss_cls = obj
+                    break
+
+            if loss_cls is None:
+                return {"status": "error", "message": "Code must define an nn.Module subclass"}
+
+            # Validate
+            loss_fn = loss_cls()
+            logits = torch.randn(1, 8, 100)
+            labels = torch.randint(0, 100, (1, 8))
+            result = loss_fn(logits, labels)
+            if not isinstance(result, torch.Tensor):
+                return {"status": "error", "message": f"Loss must return a tensor, got {type(result)}"}
+
+        except Exception as e:
+            return {"status": "error", "message": f"Code validation failed: {e}"}
+
+        engine._custom_loss = {"mode": "code", "code": code, "loss_cls": loss_cls}
+        return {"status": "ok", "mode": "code", "class_name": loss_cls.__name__,
+                "message": f"Custom loss '{loss_cls.__name__}' set. Will be used in next training run."}
+
+    return {"status": "error", "message": f"Unknown mode: {mode}"}
+
+
+@app.post("/api/llm/novel/arch-search")
+async def architecture_search(body: dict[str, Any]):
+    """Run an architecture search: try multiple block designs and rank by loss reduction.
+
+    Body: {
+        designs: {
+            "name1": [...steps...],
+            "name2": [...steps...],
+        },
+        // OR use: auto_search: true  (will try common combinations)
+        d_model: 128,
+        n_heads: 4,
+        vocab_size: 256,
+        n_layers: 2,
+        text: "training text...",
+        train_steps: 30,
+    }
+    """
+    from state_graph.layers.llm import ComposableLLM, BLOCK_DESIGNS
+    import time as _time
+
+    d_model = body.get("d_model", 128)
+    n_heads = body.get("n_heads", 4)
+    vocab_size = body.get("vocab_size", 256)
+    n_layers = body.get("n_layers", 2)
+    train_steps = body.get("train_steps", 30)
+    lr = body.get("learning_rate", 1e-3)
+    text = body.get("text", "")
+
+    if len(text) < 100:
+        text = ("The quick brown fox jumps over the lazy dog. " * 50 +
+                "Machine learning models process sequences of tokens. " * 30 +
+                "Attention mechanisms focus on relevant input parts. " * 30)
+
+    # Tokenize
+    chars = sorted(set(text))
+    c2i = {c: i for i, c in enumerate(chars)}
+    encoded = torch.tensor([c2i[c] for c in text], dtype=torch.long)
+    actual_vocab = len(chars)
+    if actual_vocab > vocab_size:
+        vocab_size = actual_vocab + 1
+
+    max_len = 64
+    n_seqs = (len(encoded) - 1) // max_len
+    if n_seqs < 2:
+        return {"status": "error", "message": "Not enough text"}
+    data = encoded[:n_seqs * max_len + 1]
+    input_ids = data[:-1].view(n_seqs, max_len)
+    labels = data[1:].view(n_seqs, max_len)
+
+    # Get designs to test
+    designs = body.get("designs", {})
+    if body.get("auto_search", False) or not designs:
+        designs = {
+            "llama": BLOCK_DESIGNS.get("llama", []),
+            "mamba": BLOCK_DESIGNS.get("mamba", []),
+            "palm": BLOCK_DESIGNS.get("palm", []),
+            "hybrid_mamba_attn": BLOCK_DESIGNS.get("hybrid_mamba_attn", []),
+            "retnet": BLOCK_DESIGNS.get("retnet", []),
+            "griffin": BLOCK_DESIGNS.get("griffin", []),
+            "minimal": BLOCK_DESIGNS.get("minimal", []),
+            "moe_block": BLOCK_DESIGNS.get("moe_block", []),
+            "parallel_moe_mamba": BLOCK_DESIGNS.get("parallel_moe_mamba", []),
+            "triple_hybrid": BLOCK_DESIGNS.get("triple_hybrid", []),
+        }
+        # Add user's custom designs
+        designs.update(body.get("designs", {}))
+
+    results = []
+
+    for name, steps in designs.items():
+        if not steps:
+            continue
+        try:
+            model = ComposableLLM(
+                vocab_size=vocab_size, d_model=d_model, n_layers=n_layers,
+                n_heads=n_heads, max_len=max_len + 64, default_block=steps,
+            )
+            total_params = sum(p.numel() for p in model.parameters())
+            optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+
+            model.train()
+            losses_list = []
+            start = _time.time()
+            for step in range(train_steps):
+                idx = step % n_seqs
+                out = model(input_ids[idx:idx+1], labels=labels[idx:idx+1])
+                loss = out["loss"]
+                optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                losses_list.append(loss.item())
+            elapsed = _time.time() - start
+
+            results.append({
+                "name": name,
+                "status": "ok",
+                "params": total_params,
+                "params_M": f"{total_params/1e6:.2f}M",
+                "initial_loss": round(losses_list[0], 4),
+                "final_loss": round(losses_list[-1], 4),
+                "loss_reduction": round(losses_list[0] - losses_list[-1], 4),
+                "time_seconds": round(elapsed, 2),
+                "steps_per_sec": round(train_steps / elapsed, 1),
+                "efficiency": round((losses_list[0] - losses_list[-1]) / (total_params / 1e6), 4),  # loss reduction per M params
+                "step_types": [s.get("type", "?") for s in steps],
+            })
+        except Exception as e:
+            results.append({"name": name, "status": "error", "message": str(e)})
+
+    # Sort by loss reduction (best first)
+    ok_results = [r for r in results if r["status"] == "ok"]
+    ok_results.sort(key=lambda r: r["loss_reduction"], reverse=True)
+    err_results = [r for r in results if r["status"] != "ok"]
+
+    ranked = ok_results + err_results
+
+    return {
+        "status": "ok",
+        "n_designs": len(designs),
+        "n_successful": len(ok_results),
+        "ranking": ranked,
+        "best": ok_results[0] if ok_results else None,
+        "summary": {
+            "best_loss_reduction": ok_results[0]["name"] if ok_results else "N/A",
+            "best_efficiency": max(ok_results, key=lambda r: r["efficiency"])["name"] if ok_results else "N/A",
+            "fastest": min(ok_results, key=lambda r: r["time_seconds"])["name"] if ok_results else "N/A",
+            "smallest": min(ok_results, key=lambda r: r["params"])["name"] if ok_results else "N/A",
+        },
+    }
+
+
+@app.get("/api/llm/blueprints")
+async def llm_blueprints():
+    """Return all model blueprints organized by category."""
+    from state_graph.layers.llm import MODEL_BLUEPRINTS, get_blueprint_categories
+    return {
+        "blueprints": {k: {
+            "name": v["name"],
+            "category": v.get("category", "other"),
+            "description": v["description"],
+            "model_class": v["model_class"],
+            "config": v["config"],
+            "scalable_configs": v.get("scalable_configs", {}),
+            "training_tips": v.get("training_tips", ""),
+            "default_block": v.get("default_block"),
+            "architecture": v.get("architecture"),
+        } for k, v in MODEL_BLUEPRINTS.items()},
+        "categories": get_blueprint_categories(),
+    }
+
+
+@app.post("/api/llm/blueprint/build")
+async def build_from_blueprint(body: dict[str, Any]):
+    """Build a model from a blueprint.
+
+    Body: {
+        blueprint: "gemini_scratch" | "claude_scratch" | "veo3_scratch" | ...,
+        scale: "nano" | "small" | "medium" | "large" | "xl",  // optional
+        overrides: { ... },  // optional: override any config parameter
+    }
+    """
+    from state_graph.layers.llm import (
+        MODEL_BLUEPRINTS, LLMModel, ComposableLLM, EncoderDecoderLLM,
+        AdaptiveDepthLLM, MultiModalLLM, UnifiedMultiModalLLM,
+    )
+
+    blueprint_key = body.get("blueprint", "")
+    if blueprint_key not in MODEL_BLUEPRINTS:
+        return {"status": "error", "message": f"Unknown blueprint: {blueprint_key}. Available: {list(MODEL_BLUEPRINTS.keys())}"}
+
+    bp = MODEL_BLUEPRINTS[blueprint_key]
+    config = dict(bp["config"])
+
+    # Apply scale preset if specified
+    scale = body.get("scale")
+    if scale and scale in bp.get("scalable_configs", {}):
+        config.update(bp["scalable_configs"][scale])
+
+    # Apply user overrides
+    overrides = body.get("overrides", {})
+    config.update(overrides)
+
+    model_class_name = bp["model_class"]
+
+    # Handle custom multi-component architectures (VeO3, Stable Diffusion)
+    if model_class_name == "custom":
+        arch = bp.get("architecture", {})
+        components = {}
+        total_params = 0
+
+        for comp_name, comp_info in arch.items():
+            components[comp_name] = {
+                "class": comp_info["class"],
+                "description": comp_info["description"],
+                "config": comp_info["config"],
+            }
+
+        # Store blueprint info in engine
+        engine._llm_config = {
+            "blueprint": blueprint_key,
+            "model_class": "custom",
+            "architecture": arch,
+            "config": config,
+        }
+
+        return {
+            "status": "ok",
+            "model_type": f"blueprint:{blueprint_key}",
+            "name": bp["name"],
+            "description": bp["description"],
+            "components": components,
+            "training_tips": bp.get("training_tips", ""),
+            "message": f"Blueprint '{bp['name']}' loaded. This is a multi-component architecture. Use /api/llm/blueprint/build-component to instantiate individual components.",
+        }
+
+    # Map model class name to actual class
+    class_map = {
+        "LLMModel": LLMModel,
+        "ComposableLLM": ComposableLLM,
+        "EncoderDecoderLLM": EncoderDecoderLLM,
+        "AdaptiveDepthLLM": AdaptiveDepthLLM,
+        "MultiModalLLM": MultiModalLLM,
+        "UnifiedMultiModalLLM": UnifiedMultiModalLLM,
+    }
+
+    ModelClass = class_map.get(model_class_name)
+    if ModelClass is None:
+        return {"status": "error", "message": f"Unknown model class: {model_class_name}"}
+
+    # Handle ComposableLLM default_block
+    build_config = dict(config)
+    if model_class_name == "ComposableLLM" and "default_block" in bp:
+        build_config["default_block"] = bp["default_block"]
+
+    # Remove non-model params
+    for key in ["moe_layers"]:
+        if key in build_config and model_class_name not in ["LLMModel"]:
+            build_config.pop(key, None)
+
+    try:
+        model = ModelClass(**build_config)
+    except TypeError as e:
+        # Some params may not apply to all model classes — filter them
+        valid_keys = set(ModelClass.__init__.__code__.co_varnames)
+        filtered = {k: v for k, v in build_config.items() if k in valid_keys}
+        model = ModelClass(**filtered)
+
+    engine.model = model
+    engine._llm_config = {
+        "blueprint": blueprint_key,
+        "model_class": model_class_name,
+        "config": config,
+    }
+
+    # Count params
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    return {
+        "status": "ok",
+        "model_type": f"blueprint:{blueprint_key}",
+        "name": bp["name"],
+        "description": bp["description"],
+        "model_class": model_class_name,
+        "config": config,
+        "parameters": {
+            "total": total,
+            "trainable": trainable,
+            "total_M": f"{total / 1e6:.1f}M",
+        },
+        "training_tips": bp.get("training_tips", ""),
+        "scalable_configs": list(bp.get("scalable_configs", {}).keys()),
+    }
+
+
+@app.post("/api/llm/blueprint/modify")
+async def modify_blueprint_model(body: dict[str, Any]):
+    """Modify the current blueprint model's configuration.
+
+    Body: {
+        changes: { "d_model": 1024, "n_layers": 24, ... },
+        rebuild: true  // whether to rebuild the model
+    }
+    """
+    config = getattr(engine, '_llm_config', None)
+    if not config or "blueprint" not in config:
+        return {"status": "error", "message": "No blueprint model loaded. Use /api/llm/blueprint/build first."}
+
+    from state_graph.layers.llm import (
+        MODEL_BLUEPRINTS, LLMModel, ComposableLLM, EncoderDecoderLLM,
+        AdaptiveDepthLLM, MultiModalLLM, UnifiedMultiModalLLM,
+    )
+
+    changes = body.get("changes", {})
+    config["config"].update(changes)
+
+    if body.get("rebuild", True) and config["model_class"] != "custom":
+        bp = MODEL_BLUEPRINTS.get(config["blueprint"], {})
+        model_class_name = config["model_class"]
+
+        class_map = {
+            "LLMModel": LLMModel,
+            "ComposableLLM": ComposableLLM,
+            "EncoderDecoderLLM": EncoderDecoderLLM,
+            "AdaptiveDepthLLM": AdaptiveDepthLLM,
+            "MultiModalLLM": MultiModalLLM,
+            "UnifiedMultiModalLLM": UnifiedMultiModalLLM,
+        }
+
+        ModelClass = class_map.get(model_class_name)
+        if ModelClass:
+            build_config = dict(config["config"])
+            if model_class_name == "ComposableLLM" and "default_block" in bp:
+                build_config["default_block"] = bp["default_block"]
+
+            try:
+                model = ModelClass(**build_config)
+            except TypeError:
+                valid_keys = set(ModelClass.__init__.__code__.co_varnames)
+                filtered = {k: v for k, v in build_config.items() if k in valid_keys}
+                model = ModelClass(**filtered)
+
+            engine.model = model
+
+            total = sum(p.numel() for p in model.parameters())
+            trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+            return {
+                "status": "ok",
+                "message": "Model rebuilt with updated config",
+                "config": config["config"],
+                "parameters": {"total": total, "trainable": trainable, "total_M": f"{total / 1e6:.1f}M"},
+            }
+
+    return {"status": "ok", "message": "Config updated (model not rebuilt)", "config": config["config"]}
+
+
+@app.post("/api/llm/blueprint/build-components")
+async def build_blueprint_components(body: dict[str, Any]):
+    """Build all components of a multi-component blueprint (VeO3, Stable Diffusion).
+
+    Body: {
+        blueprint: "veo3_scratch" | "stable_diffusion_scratch",
+        scale: "nano" | "small" | "medium",
+        overrides: {},
+    }
+    """
+    from state_graph.layers.llm import MODEL_BLUEPRINTS, EncoderDecoderLLM
+    from state_graph.layers.custom import DiffusionUNet, VAE, VideoVAE, NoiseScheduler
+
+    blueprint_key = body.get("blueprint", "")
+    bp = MODEL_BLUEPRINTS.get(blueprint_key)
+    if not bp or bp.get("model_class") != "custom":
+        return {"status": "error", "message": f"Blueprint '{blueprint_key}' is not a multi-component architecture"}
+
+    arch = bp.get("architecture", {})
+    class_map = {
+        "DiffusionUNet": DiffusionUNet,
+        "VAE": VAE,
+        "VideoVAE": VideoVAE,
+        "NoiseScheduler": NoiseScheduler,
+        "EncoderDecoderLLM": EncoderDecoderLLM,
+    }
+
+    built = {}
+    total_params = 0
+
+    for comp_name, comp_info in arch.items():
+        cls_name = comp_info["class"]
+        cls = class_map.get(cls_name)
+        if cls is None:
+            built[comp_name] = {"status": "skipped", "reason": f"Unknown class: {cls_name}"}
+            continue
+
+        cfg = dict(comp_info["config"])
+        # Apply scale overrides
+        scale = body.get("scale")
+        if scale:
+            scale_cfg = bp.get("scalable_configs", {}).get(scale, {})
+            for k, v in scale_cfg.items():
+                if k.startswith(comp_name + "."):
+                    cfg[k.split(".", 1)[1]] = v
+
+        # Apply user overrides
+        for k, v in body.get("overrides", {}).items():
+            if k.startswith(comp_name + "."):
+                cfg[k.split(".", 1)[1]] = v
+
+        try:
+            if cls_name == "NoiseScheduler":
+                obj = cls(**cfg)
+                built[comp_name] = {"status": "built", "class": cls_name, "config": cfg}
+                if not hasattr(engine, '_diffusion_components'):
+                    engine._diffusion_components = {}
+                engine._diffusion_components[comp_name] = obj
+            elif cls_name == "EncoderDecoderLLM":
+                # Text encoder: only build encoder layers
+                if cfg.get("n_decoder_layers", 0) == 0:
+                    cfg["n_decoder_layers"] = 1  # Need at least 1 for the class
+                obj = cls(**cfg)
+                params = sum(p.numel() for p in obj.parameters())
+                total_params += params
+                built[comp_name] = {"status": "built", "class": cls_name, "params": params, "params_M": f"{params/1e6:.1f}M"}
+                if not hasattr(engine, '_diffusion_components'):
+                    engine._diffusion_components = {}
+                engine._diffusion_components[comp_name] = obj.to(engine.device)
+            else:
+                obj = cls(**cfg)
+                params = sum(p.numel() for p in obj.parameters())
+                total_params += params
+                built[comp_name] = {"status": "built", "class": cls_name, "params": params, "params_M": f"{params/1e6:.1f}M"}
+                if not hasattr(engine, '_diffusion_components'):
+                    engine._diffusion_components = {}
+                engine._diffusion_components[comp_name] = obj.to(engine.device)
+        except Exception as e:
+            built[comp_name] = {"status": "error", "message": str(e)}
+
+    engine._llm_config = {
+        "blueprint": blueprint_key,
+        "model_class": "custom",
+        "architecture": arch,
+        "components": built,
+    }
+
+    return {
+        "status": "ok",
+        "blueprint": blueprint_key,
+        "name": bp["name"],
+        "components": built,
+        "total_params": total_params,
+        "total_params_M": f"{total_params/1e6:.1f}M",
+        "training_tips": bp.get("training_tips", ""),
+    }
+
+
+@app.post("/api/diffusion/train")
+async def train_diffusion(body: dict[str, Any]):
+    """Train a diffusion model (image or video generation).
+
+    Body: {
+        mode: "image" | "video",
+        epochs: 10,
+        batch_size: 4,
+        learning_rate: 1e-4,
+        image_size: 64,
+        n_steps: 1000,
+        schedule: "cosine",
+        use_vae: true,       // train in latent space
+        data_source: "random" | "folder_path",
+    }
+    """
+    import threading
+    from state_graph.layers.custom import DiffusionUNet, VAE, VideoVAE, NoiseScheduler
+
+    mode = body.get("mode", "image")
+    epochs = body.get("epochs", 10)
+    batch_size = body.get("batch_size", 4)
+    lr = body.get("learning_rate", 1e-4)
+    image_size = body.get("image_size", 64)
+    n_steps = body.get("n_steps", 1000)
+    schedule = body.get("schedule", "cosine")
+    use_vae = body.get("use_vae", False)
+
+    # Get or create components
+    components = getattr(engine, '_diffusion_components', {})
+
+    # Noise scheduler
+    if "noise_scheduler" not in components:
+        components["noise_scheduler"] = NoiseScheduler(n_steps=n_steps, schedule=schedule)
+
+    sched = components["noise_scheduler"]
+
+    # UNet denoiser
+    if "denoiser" not in components:
+        in_ch = 4 if use_vae else 3
+        components["denoiser"] = DiffusionUNet(
+            in_channels=in_ch, out_channels=in_ch,
+            base_channels=body.get("base_channels", 64),
+            channel_mults=tuple(body.get("channel_mults", [1, 2, 4])),
+            n_res_blocks=body.get("n_res_blocks", 2),
+            time_dim=body.get("time_dim", 256),
+            context_dim=body.get("context_dim", 256),
+            n_heads=body.get("n_heads", 4),
+        ).to(engine.device)
+
+    unet = components["denoiser"]
+
+    # VAE (optional)
+    vae = None
+    if use_vae:
+        if "vae" not in components:
+            components["vae"] = VAE(
+                in_channels=3, latent_channels=4,
+                base_channels=32, channel_mults=(1, 2, 4),
+            ).to(engine.device)
+        vae = components["vae"]
+        vae.eval()
+
+    engine._diffusion_components = components
+
+    # Create synthetic data for demo (or load from folder)
+    data_source = body.get("data_source", "random")
+    if data_source == "random":
+        n_samples = body.get("n_samples", max(batch_size * 10, 64))
+        data = torch.randn(n_samples, 3, image_size, image_size)
+    else:
+        return {"status": "error", "message": "Folder data loading not yet implemented. Use data_source='random' for demo."}
+
+    from torch.utils.data import DataLoader, TensorDataset
+    loader = DataLoader(TensorDataset(data), batch_size=batch_size, shuffle=True)
+
+    optimizer = torch.optim.AdamW(unet.parameters(), lr=lr, weight_decay=0.01)
+
+    if engine._is_training:
+        return {"status": "error", "message": "Training already in progress"}
+
+    engine._stop_event.clear()
+    engine._is_training = True
+
+    total_params = sum(p.numel() for p in unet.parameters())
+
+    def train():
+        try:
+            unet.train()
+            step = 0
+            for epoch in range(epochs):
+                if engine._stop_event.is_set():
+                    break
+                epoch_loss = 0.0
+                n_batches = 0
+                for (batch,) in loader:
+                    if engine._stop_event.is_set():
+                        break
+                    batch = batch.to(engine.device)
+
+                    # Encode to latent if using VAE
+                    if vae is not None:
+                        with torch.no_grad():
+                            mu, log_var = vae.encode(batch)
+                            batch = mu  # Use mean (no reparameterization for training UNet)
+
+                    # Sample noise and timesteps
+                    noise = torch.randn_like(batch)
+                    t = sched.sample_timesteps(batch.shape[0], engine.device)
+                    noisy = sched.add_noise(batch, noise, t)
+
+                    # Predict noise
+                    pred_noise = unet(noisy, t)
+
+                    # MSE loss
+                    loss = torch.nn.functional.mse_loss(pred_noise, noise)
+
+                    optimizer.zero_grad()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(unet.parameters(), 1.0)
+                    optimizer.step()
+
+                    epoch_loss += loss.item()
+                    n_batches += 1
+                    step += 1
+
+                avg_loss = epoch_loss / max(n_batches, 1)
+
+                engine._emit_from_thread("training_step", {
+                    "epoch": epoch + 1, "total_epochs": epochs,
+                    "loss": avg_loss, "step": step,
+                    "model_type": "diffusion",
+                })
+
+            engine._emit_from_thread("training_complete", {
+                "epochs": epochs, "final_loss": avg_loss if 'avg_loss' in dir() else 0,
+                "model_type": "diffusion",
+            })
+        except Exception as e:
+            import traceback
+            engine._emit_from_thread("training_error", {"error": str(e), "traceback": traceback.format_exc()})
+        finally:
+            engine._is_training = False
+
+    engine._train_thread = threading.Thread(target=train, daemon=True)
+    engine._train_thread.start()
+
+    return {
+        "status": "started",
+        "mode": mode,
+        "model_params": total_params,
+        "model_params_M": f"{total_params/1e6:.1f}M",
+        "epochs": epochs,
+        "n_samples": len(data),
+        "image_size": image_size,
+        "use_vae": use_vae,
+    }
+
+
+@app.post("/api/diffusion/generate")
+async def diffusion_generate(body: dict[str, Any]):
+    """Generate images using a trained diffusion model.
+
+    Body: {
+        n_images: 4,
+        n_steps: 50,
+        guidance_scale: 7.5,
+        prompt: "optional text prompt",
+    }
+    """
+    components = getattr(engine, '_diffusion_components', {})
+    unet = components.get("denoiser")
+    if unet is None:
+        return {"status": "error", "message": "No diffusion model loaded. Build a blueprint first."}
+
+    sched = components.get("noise_scheduler")
+    vae = components.get("vae")
+
+    n_images = body.get("n_images", 4)
+    n_steps = body.get("n_steps", 50)
+
+    unet.eval()
+    device = engine.device
+
+    # Determine latent shape from the UNet input
+    in_ch = 4 if vae else 3
+    image_size = body.get("image_size", 64)
+    latent_size = image_size // 8 if vae else image_size
+
+    # DDPM sampling (simplified)
+    with torch.no_grad():
+        x = torch.randn(n_images, in_ch, latent_size, latent_size, device=device)
+
+        # Simple linear schedule for sampling
+        timesteps = torch.linspace(sched.n_steps - 1, 0, n_steps, dtype=torch.long, device=device) if sched else torch.linspace(999, 0, n_steps, dtype=torch.long, device=device)
+
+        for t_val in timesteps:
+            t = torch.full((n_images,), t_val.long().item(), device=device, dtype=torch.long)
+            pred_noise = unet(x, t)
+            # Simplified DDPM step
+            alpha = sched.alphas[t_val.long().item()] if sched else 0.99
+            alpha_bar = sched.alpha_cumprod[t_val.long().item()] if sched else 0.5
+            beta = 1 - alpha
+            x = (1 / alpha**0.5) * (x - (beta / (1 - alpha_bar)**0.5) * pred_noise)
+            if t_val > 0:
+                x = x + (beta**0.5) * torch.randn_like(x) * 0.5
+
+        # Decode from latent if VAE
+        if vae is not None:
+            x = vae.decode(x)
+
+        # Clamp to valid range
+        x = x.clamp(-1, 1)
+
+    return {
+        "status": "ok",
+        "n_images": n_images,
+        "image_shape": list(x.shape),
+        "message": f"Generated {n_images} images of shape {list(x.shape[1:])}",
+    }
+
+
+@app.post("/api/diffusion/train-vae")
+async def train_vae(body: dict[str, Any]):
+    """Train the VAE component for latent diffusion.
+
+    Body: {
+        epochs: 20,
+        batch_size: 8,
+        learning_rate: 1e-4,
+        image_size: 64,
+        kl_weight: 0.01,
+        data_source: "random",
+    }
+    """
+    import threading
+    from state_graph.layers.custom import VAE
+
+    epochs = body.get("epochs", 20)
+    batch_size = body.get("batch_size", 8)
+    lr = body.get("learning_rate", 1e-4)
+    image_size = body.get("image_size", 64)
+    kl_weight = body.get("kl_weight", 0.01)
+
+    components = getattr(engine, '_diffusion_components', {})
+    if "vae" not in components:
+        components["vae"] = VAE(
+            in_channels=3, latent_channels=4,
+            base_channels=body.get("base_channels", 32),
+            channel_mults=tuple(body.get("channel_mults", [1, 2, 4])),
+        ).to(engine.device)
+    engine._diffusion_components = components
+
+    vae = components["vae"]
+    optimizer = torch.optim.AdamW(vae.parameters(), lr=lr, weight_decay=0.01)
+
+    # Synthetic data
+    n_samples = body.get("n_samples", max(batch_size * 10, 64))
+    data = torch.randn(n_samples, 3, image_size, image_size)
+
+    from torch.utils.data import DataLoader, TensorDataset
+    loader = DataLoader(TensorDataset(data), batch_size=batch_size, shuffle=True)
+
+    if engine._is_training:
+        return {"status": "error", "message": "Training already in progress"}
+
+    engine._stop_event.clear()
+    engine._is_training = True
+    total_params = sum(p.numel() for p in vae.parameters())
+
+    def train():
+        try:
+            vae.train()
+            step = 0
+            for epoch in range(epochs):
+                if engine._stop_event.is_set():
+                    break
+                epoch_loss = 0.0
+                n_batches = 0
+                for (batch,) in loader:
+                    if engine._stop_event.is_set():
+                        break
+                    batch = batch.to(engine.device)
+                    out = vae(batch)
+                    recon_loss = torch.nn.functional.mse_loss(out["reconstruction"], batch)
+                    loss = recon_loss + kl_weight * out["kl_loss"]
+
+                    optimizer.zero_grad()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(vae.parameters(), 1.0)
+                    optimizer.step()
+
+                    epoch_loss += loss.item()
+                    n_batches += 1
+                    step += 1
+
+                avg_loss = epoch_loss / max(n_batches, 1)
+                engine._emit_from_thread("training_step", {
+                    "epoch": epoch + 1, "total_epochs": epochs,
+                    "loss": avg_loss, "step": step,
+                    "model_type": "vae",
+                })
+
+            engine._emit_from_thread("training_complete", {
+                "epochs": epochs, "final_loss": avg_loss if 'avg_loss' in dir() else 0,
+                "model_type": "vae",
+            })
+        except Exception as e:
+            import traceback
+            engine._emit_from_thread("training_error", {"error": str(e), "traceback": traceback.format_exc()})
+        finally:
+            engine._is_training = False
+
+    engine._train_thread = threading.Thread(target=train, daemon=True)
+    engine._train_thread.start()
+
+    return {
+        "status": "started",
+        "model_type": "vae",
+        "model_params_M": f"{total_params/1e6:.1f}M",
+        "epochs": epochs,
+        "image_size": image_size,
+        "kl_weight": kl_weight,
+    }
 
 
 @app.post("/api/llm/encoder-decoder")
@@ -4313,6 +5648,317 @@ TEMPLATES = {
             {"layer_type": "ResConvBlock", "params": {"in_channels": 128, "out_channels": 256}, "activation": None, "position": 3},
             {"layer_type": "GlobalAvgPool", "params": {}, "activation": None, "position": 4},
             {"layer_type": "Linear", "params": {"in_features": 256, "out_features": 10}, "activation": None, "position": 5},
+        ],
+    },
+    # ========================= ADVANCED VISION =========================
+    "swin_transformer": {
+        "name": "Swin Transformer",
+        "description": "Shifted window transformer for image classification (Swin-T style)",
+        "dataset": "cifar10",
+        "dataset_type": "real",
+        "nodes": [
+            {"layer_type": "PatchEmbed", "params": {"in_channels": 3, "d_model": 96, "patch_size": 4, "image_size": 32}, "activation": None, "position": 0},
+            {"layer_type": "SwinStage", "params": {"d_model": 96, "depth": 2, "n_heads": 3, "window_size": 7, "downsample": True}, "activation": None, "position": 1},
+            {"layer_type": "SwinStage", "params": {"d_model": 192, "depth": 2, "n_heads": 6, "window_size": 7, "downsample": True}, "activation": None, "position": 2},
+            {"layer_type": "SwinStage", "params": {"d_model": 384, "depth": 6, "n_heads": 12, "window_size": 7, "downsample": True}, "activation": None, "position": 3},
+            {"layer_type": "SwinStage", "params": {"d_model": 768, "depth": 2, "n_heads": 24, "window_size": 7, "downsample": False}, "activation": None, "position": 4},
+            {"layer_type": "GlobalAvgPool", "params": {}, "activation": None, "position": 5},
+            {"layer_type": "Linear", "params": {"in_features": 768, "out_features": 10}, "activation": None, "position": 6},
+        ],
+    },
+    "convnext": {
+        "name": "ConvNeXt",
+        "description": "Modernized ConvNet competing with transformers",
+        "dataset": "cifar10",
+        "dataset_type": "real",
+        "nodes": [
+            {"layer_type": "Conv2d", "params": {"in_channels": 3, "out_channels": 96, "kernel_size": 4, "stride": 4}, "activation": None, "position": 0},
+            {"layer_type": "ConvNeXtBlock", "params": {"dim": 96}, "activation": None, "position": 1},
+            {"layer_type": "ConvNeXtBlock", "params": {"dim": 96}, "activation": None, "position": 2},
+            {"layer_type": "ConvNeXtBlock", "params": {"dim": 96}, "activation": None, "position": 3},
+            {"layer_type": "GlobalAvgPool", "params": {}, "activation": None, "position": 4},
+            {"layer_type": "Linear", "params": {"in_features": 96, "out_features": 10}, "activation": None, "position": 5},
+        ],
+    },
+    "yolov8_backbone": {
+        "name": "YOLOv8 Backbone",
+        "description": "YOLOv8-style backbone with CSP and C2f blocks for object detection",
+        "dataset": "cifar10",
+        "dataset_type": "real",
+        "nodes": [
+            {"layer_type": "Conv2d", "params": {"in_channels": 3, "out_channels": 64, "kernel_size": 3, "stride": 2, "padding": 1}, "activation": "SiLU", "position": 0},
+            {"layer_type": "Conv2d", "params": {"in_channels": 64, "out_channels": 128, "kernel_size": 3, "stride": 2, "padding": 1}, "activation": "SiLU", "position": 1},
+            {"layer_type": "C2fBlock", "params": {"in_channels": 128, "out_channels": 128, "n_bottlenecks": 3}, "activation": None, "position": 2},
+            {"layer_type": "Conv2d", "params": {"in_channels": 128, "out_channels": 256, "kernel_size": 3, "stride": 2, "padding": 1}, "activation": "SiLU", "position": 3},
+            {"layer_type": "C2fBlock", "params": {"in_channels": 256, "out_channels": 256, "n_bottlenecks": 6}, "activation": None, "position": 4},
+            {"layer_type": "Conv2d", "params": {"in_channels": 256, "out_channels": 512, "kernel_size": 3, "stride": 2, "padding": 1}, "activation": "SiLU", "position": 5},
+            {"layer_type": "C2fBlock", "params": {"in_channels": 512, "out_channels": 512, "n_bottlenecks": 6}, "activation": None, "position": 6},
+            {"layer_type": "SPPFBlock", "params": {"in_channels": 512, "out_channels": 512}, "activation": None, "position": 7},
+            {"layer_type": "GlobalAvgPool", "params": {}, "activation": None, "position": 8},
+            {"layer_type": "DetectionHead", "params": {"in_channels": 512, "num_classes": 80}, "activation": None, "position": 9},
+        ],
+    },
+    "detr_detector": {
+        "name": "DETR Detector",
+        "description": "DEtection TRansformer — end-to-end object detection with transformer",
+        "dataset": "cifar10",
+        "dataset_type": "real",
+        "nodes": [
+            {"layer_type": "MultiScaleFeatureExtractor", "params": {"in_channels": 3, "channels": [64, 128, 256, 512]}, "activation": None, "position": 0},
+            {"layer_type": "Conv2d", "params": {"in_channels": 512, "out_channels": 256, "kernel_size": 1}, "activation": None, "position": 1},
+            {"layer_type": "Flatten", "params": {"start_dim": 2}, "activation": None, "position": 2},
+            {"layer_type": "Transpose", "params": {"dim0": 1, "dim1": 2}, "activation": None, "position": 3},
+            {"layer_type": "TransformerBlock", "params": {"d_model": 256, "n_heads": 8, "dropout": 0.1}, "activation": None, "position": 4},
+            {"layer_type": "TransformerBlock", "params": {"d_model": 256, "n_heads": 8, "dropout": 0.1}, "activation": None, "position": 5},
+            {"layer_type": "TransformerBlock", "params": {"d_model": 256, "n_heads": 8, "dropout": 0.1}, "activation": None, "position": 6},
+            {"layer_type": "DETRTransformerDecoder", "params": {"d_model": 256, "n_heads": 8, "num_layers": 6, "num_queries": 100}, "activation": None, "position": 7},
+        ],
+    },
+    # ========================= ADVANCED DIFFUSION =========================
+    "dit_small": {
+        "name": "DiT-S (Diffusion Transformer)",
+        "description": "Diffusion Transformer — scalable diffusion with transformer backbone",
+        "dataset": "mnist",
+        "dataset_type": "real",
+        "nodes": [
+            {"layer_type": "PatchEmbedDiT", "params": {"in_channels": 1, "d_model": 384, "patch_size": 4, "image_size": 28}, "activation": None, "position": 0},
+            {"layer_type": "TimestepMLP", "params": {"d_model": 384, "time_embed_dim": 384}, "activation": None, "position": 1},
+            {"layer_type": "DiTBlock", "params": {"d_model": 384, "n_heads": 6, "cond_dim": 384}, "activation": None, "position": 2},
+            {"layer_type": "DiTBlock", "params": {"d_model": 384, "n_heads": 6, "cond_dim": 384}, "activation": None, "position": 3},
+            {"layer_type": "DiTBlock", "params": {"d_model": 384, "n_heads": 6, "cond_dim": 384}, "activation": None, "position": 4},
+            {"layer_type": "DiTBlock", "params": {"d_model": 384, "n_heads": 6, "cond_dim": 384}, "activation": None, "position": 5},
+            {"layer_type": "DiTBlock", "params": {"d_model": 384, "n_heads": 6, "cond_dim": 384}, "activation": None, "position": 6},
+            {"layer_type": "DiTBlock", "params": {"d_model": 384, "n_heads": 6, "cond_dim": 384}, "activation": None, "position": 7},
+            {"layer_type": "DiTFinalLayer", "params": {"d_model": 384, "patch_size": 4, "out_channels": 1}, "activation": None, "position": 8},
+        ],
+    },
+    "sd_unet": {
+        "name": "Stable Diffusion UNet",
+        "description": "UNet with cross-attention for text-conditioned image generation",
+        "dataset": "mnist",
+        "dataset_type": "real",
+        "nodes": [
+            {"layer_type": "TimestepMLP", "params": {"d_model": 128, "time_embed_dim": 512}, "activation": None, "position": 0},
+            {"layer_type": "UNetDownBlock", "params": {"in_channels": 1, "out_channels": 128, "time_embed_dim": 512, "num_layers": 2, "has_attention": False}, "activation": None, "position": 1},
+            {"layer_type": "UNetDownBlock", "params": {"in_channels": 128, "out_channels": 256, "time_embed_dim": 512, "num_layers": 2, "has_attention": True, "context_dim": 256}, "activation": None, "position": 2},
+            {"layer_type": "UNetDownBlock", "params": {"in_channels": 256, "out_channels": 512, "time_embed_dim": 512, "num_layers": 2, "has_attention": True, "context_dim": 256}, "activation": None, "position": 3},
+            {"layer_type": "UNetMidBlock", "params": {"channels": 512, "time_embed_dim": 512, "context_dim": 256}, "activation": None, "position": 4},
+            {"layer_type": "UNetUpBlock", "params": {"in_channels": 512, "out_channels": 256, "skip_channels": 512, "time_embed_dim": 512, "num_layers": 2, "has_attention": True, "context_dim": 256}, "activation": None, "position": 5},
+            {"layer_type": "UNetUpBlock", "params": {"in_channels": 256, "out_channels": 128, "skip_channels": 256, "time_embed_dim": 512, "num_layers": 2, "has_attention": True, "context_dim": 256}, "activation": None, "position": 6},
+            {"layer_type": "UNetUpBlock", "params": {"in_channels": 128, "out_channels": 64, "skip_channels": 128, "time_embed_dim": 512, "num_layers": 2, "has_attention": False}, "activation": None, "position": 7},
+        ],
+    },
+    # ========================= ADVANCED AUDIO / SPEECH =========================
+    "conformer_asr": {
+        "name": "Conformer (ASR)",
+        "description": "Conformer encoder for automatic speech recognition — state-of-the-art ASR",
+        "dataset": "random",
+        "nodes": [
+            {"layer_type": "MelSpectrogram", "params": {"n_mels": 80, "n_fft": 512, "hop_length": 160}, "activation": None, "position": 0},
+            {"layer_type": "AudioConvBlock", "params": {"in_channels": 80, "out_channels": 256}, "activation": None, "position": 1},
+            {"layer_type": "Transpose", "params": {"dim0": 1, "dim1": 2}, "activation": None, "position": 2},
+            {"layer_type": "ConformerBlock", "params": {"d_model": 256, "n_heads": 4, "ffn_dim": 1024, "kernel_size": 31}, "activation": None, "position": 3},
+            {"layer_type": "ConformerBlock", "params": {"d_model": 256, "n_heads": 4, "ffn_dim": 1024, "kernel_size": 31}, "activation": None, "position": 4},
+            {"layer_type": "ConformerBlock", "params": {"d_model": 256, "n_heads": 4, "ffn_dim": 1024, "kernel_size": 31}, "activation": None, "position": 5},
+            {"layer_type": "ConformerBlock", "params": {"d_model": 256, "n_heads": 4, "ffn_dim": 1024, "kernel_size": 31}, "activation": None, "position": 6},
+            {"layer_type": "Linear", "params": {"in_features": 256, "out_features": 5000}, "activation": None, "position": 7},
+        ],
+    },
+    "whisper_encoder": {
+        "name": "Whisper-style Encoder",
+        "description": "Whisper-style audio encoder with conv stem + transformer layers",
+        "dataset": "random",
+        "nodes": [
+            {"layer_type": "MelSpectrogram", "params": {"n_mels": 80, "n_fft": 400, "hop_length": 160}, "activation": None, "position": 0},
+            {"layer_type": "Conv1d", "params": {"in_channels": 80, "out_channels": 256, "kernel_size": 3, "padding": 1}, "activation": "GELU", "position": 1},
+            {"layer_type": "Conv1d", "params": {"in_channels": 256, "out_channels": 256, "kernel_size": 3, "stride": 2, "padding": 1}, "activation": "GELU", "position": 2},
+            {"layer_type": "Transpose", "params": {"dim0": 1, "dim1": 2}, "activation": None, "position": 3},
+            {"layer_type": "PositionalEncoding", "params": {"d_model": 256, "max_len": 1500}, "activation": None, "position": 4},
+            {"layer_type": "TransformerBlock", "params": {"d_model": 256, "n_heads": 4, "dropout": 0.1}, "activation": None, "position": 5},
+            {"layer_type": "TransformerBlock", "params": {"d_model": 256, "n_heads": 4, "dropout": 0.1}, "activation": None, "position": 6},
+            {"layer_type": "TransformerBlock", "params": {"d_model": 256, "n_heads": 4, "dropout": 0.1}, "activation": None, "position": 7},
+            {"layer_type": "TransformerBlock", "params": {"d_model": 256, "n_heads": 4, "dropout": 0.1}, "activation": None, "position": 8},
+            {"layer_type": "SequencePool", "params": {"d_model": 256, "mode": "mean"}, "activation": None, "position": 9},
+            {"layer_type": "Linear", "params": {"in_features": 256, "out_features": 5000}, "activation": None, "position": 10},
+        ],
+    },
+    "hifi_gan_generator": {
+        "name": "HiFi-GAN Generator",
+        "description": "Neural vocoder for high-fidelity speech synthesis",
+        "dataset": "random",
+        "nodes": [
+            {"layer_type": "Conv1d", "params": {"in_channels": 80, "out_channels": 512, "kernel_size": 7, "padding": 3}, "activation": None, "position": 0},
+            {"layer_type": "VocoderUpsampleBlock", "params": {"in_channels": 512, "out_channels": 256, "upsample_rate": 8, "kernel_size": 16}, "activation": None, "position": 1},
+            {"layer_type": "VocoderUpsampleBlock", "params": {"in_channels": 256, "out_channels": 128, "upsample_rate": 8, "kernel_size": 16}, "activation": None, "position": 2},
+            {"layer_type": "VocoderUpsampleBlock", "params": {"in_channels": 128, "out_channels": 64, "upsample_rate": 2, "kernel_size": 4}, "activation": None, "position": 3},
+            {"layer_type": "VocoderUpsampleBlock", "params": {"in_channels": 64, "out_channels": 32, "upsample_rate": 2, "kernel_size": 4}, "activation": None, "position": 4},
+            {"layer_type": "Conv1d", "params": {"in_channels": 32, "out_channels": 1, "kernel_size": 7, "padding": 3}, "activation": "Tanh", "position": 5},
+        ],
+    },
+    "tts_fastspeech": {
+        "name": "FastSpeech2 TTS",
+        "description": "Non-autoregressive text-to-speech with duration/pitch/energy prediction",
+        "dataset": "random",
+        "nodes": [
+            {"layer_type": "Embedding", "params": {"num_embeddings": 256, "embedding_dim": 256}, "activation": None, "position": 0},
+            {"layer_type": "PositionalEncoding", "params": {"d_model": 256}, "activation": None, "position": 1},
+            {"layer_type": "TransformerBlock", "params": {"d_model": 256, "n_heads": 4, "dropout": 0.1}, "activation": None, "position": 2},
+            {"layer_type": "TransformerBlock", "params": {"d_model": 256, "n_heads": 4, "dropout": 0.1}, "activation": None, "position": 3},
+            {"layer_type": "TransformerBlock", "params": {"d_model": 256, "n_heads": 4, "dropout": 0.1}, "activation": None, "position": 4},
+            {"layer_type": "TransformerBlock", "params": {"d_model": 256, "n_heads": 4, "dropout": 0.1}, "activation": None, "position": 5},
+            {"layer_type": "DurationPredictor", "params": {"d_model": 256, "kernel_size": 3, "num_layers": 2}, "activation": None, "position": 6},
+            {"layer_type": "VariancePredictor", "params": {"d_model": 256, "kernel_size": 3, "num_layers": 2}, "activation": None, "position": 7},
+            {"layer_type": "Linear", "params": {"in_features": 256, "out_features": 80}, "activation": None, "position": 8},
+        ],
+    },
+    "voice_cloning": {
+        "name": "Voice Cloning Encoder",
+        "description": "Speaker encoder + mel decoder for voice cloning / conversion",
+        "dataset": "random",
+        "nodes": [
+            {"layer_type": "MelSpectrogram", "params": {"n_mels": 40, "n_fft": 512, "hop_length": 160}, "activation": None, "position": 0},
+            {"layer_type": "SpeakerEncoder", "params": {"in_channels": 40, "d_model": 256, "num_layers": 3}, "activation": None, "position": 1},
+            {"layer_type": "Linear", "params": {"in_features": 256, "out_features": 512}, "activation": "ReLU", "position": 2},
+            {"layer_type": "Linear", "params": {"in_features": 512, "out_features": 256}, "activation": None, "position": 3},
+        ],
+    },
+    # ========================= ADVANCED LLM =========================
+    "gemini_style": {
+        "name": "Gemini-style Multi-Modal LLM",
+        "description": "Multi-modal transformer LLM with vision + audio + text (Gemini/GPT-4 architecture)",
+        "dataset": "random",
+        "nodes": [
+            {"layer_type": "Embedding", "params": {"num_embeddings": 32000, "embedding_dim": 512}, "activation": None, "position": 0},
+            {"layer_type": "RotaryPositionalEmbedding", "params": {"d_model": 512}, "activation": None, "position": 1},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 512, "n_heads": 8, "ffn_type": "swiglu", "norm_type": "rmsnorm", "dropout": 0.0}, "activation": None, "position": 2},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 512, "n_heads": 8, "ffn_type": "swiglu", "norm_type": "rmsnorm", "dropout": 0.0}, "activation": None, "position": 3},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 512, "n_heads": 8, "ffn_type": "swiglu", "norm_type": "rmsnorm", "dropout": 0.0}, "activation": None, "position": 4},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 512, "n_heads": 8, "ffn_type": "swiglu", "norm_type": "rmsnorm", "dropout": 0.0}, "activation": None, "position": 5},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 512, "n_heads": 8, "ffn_type": "swiglu", "norm_type": "rmsnorm", "dropout": 0.0}, "activation": None, "position": 6},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 512, "n_heads": 8, "ffn_type": "swiglu", "norm_type": "rmsnorm", "dropout": 0.0}, "activation": None, "position": 7},
+            {"layer_type": "RMSNorm", "params": {"d_model": 512}, "activation": None, "position": 8},
+            {"layer_type": "Linear", "params": {"in_features": 512, "out_features": 32000}, "activation": None, "position": 9},
+        ],
+    },
+    "claude_style_llm": {
+        "name": "Claude/GPT-style Decoder LLM",
+        "description": "Large decoder-only transformer with RoPE, SwiGLU, RMSNorm — Claude/Llama architecture",
+        "dataset": "random",
+        "nodes": [
+            {"layer_type": "Embedding", "params": {"num_embeddings": 32000, "embedding_dim": 768}, "activation": None, "position": 0},
+            {"layer_type": "RotaryPositionalEmbedding", "params": {"d_model": 768}, "activation": None, "position": 1},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 768, "n_heads": 12, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 2},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 768, "n_heads": 12, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 3},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 768, "n_heads": 12, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 4},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 768, "n_heads": 12, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 5},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 768, "n_heads": 12, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 6},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 768, "n_heads": 12, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 7},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 768, "n_heads": 12, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 8},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 768, "n_heads": 12, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 9},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 768, "n_heads": 12, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 10},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 768, "n_heads": 12, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 11},
+            {"layer_type": "RMSNorm", "params": {"d_model": 768}, "activation": None, "position": 12},
+            {"layer_type": "Linear", "params": {"in_features": 768, "out_features": 32000}, "activation": None, "position": 13},
+        ],
+    },
+    "moe_llm": {
+        "name": "Mixture-of-Experts LLM",
+        "description": "Mixtral/Switch-style MoE transformer — sparse expert routing for efficiency",
+        "dataset": "random",
+        "nodes": [
+            {"layer_type": "Embedding", "params": {"num_embeddings": 32000, "embedding_dim": 512}, "activation": None, "position": 0},
+            {"layer_type": "RotaryPositionalEmbedding", "params": {"d_model": 512}, "activation": None, "position": 1},
+            {"layer_type": "RMSNorm", "params": {"d_model": 512}, "activation": None, "position": 2},
+            {"layer_type": "LLMAttention", "params": {"d_model": 512, "n_heads": 8}, "activation": None, "position": 3},
+            {"layer_type": "RMSNorm", "params": {"d_model": 512}, "activation": None, "position": 4},
+            {"layer_type": "MoELayer", "params": {"d_model": 512, "num_experts": 8, "top_k": 2, "ffn_dim": 2048}, "activation": None, "position": 5},
+            {"layer_type": "RMSNorm", "params": {"d_model": 512}, "activation": None, "position": 6},
+            {"layer_type": "LLMAttention", "params": {"d_model": 512, "n_heads": 8}, "activation": None, "position": 7},
+            {"layer_type": "RMSNorm", "params": {"d_model": 512}, "activation": None, "position": 8},
+            {"layer_type": "MoELayer", "params": {"d_model": 512, "num_experts": 8, "top_k": 2, "ffn_dim": 2048}, "activation": None, "position": 9},
+            {"layer_type": "RMSNorm", "params": {"d_model": 512}, "activation": None, "position": 10},
+            {"layer_type": "Linear", "params": {"in_features": 512, "out_features": 32000}, "activation": None, "position": 11},
+        ],
+    },
+    "encoder_decoder_t5": {
+        "name": "T5/BART Encoder-Decoder",
+        "description": "Encoder-decoder transformer (T5/BART style) for seq2seq, translation, summarization",
+        "dataset": "random",
+        "nodes": [
+            {"layer_type": "Embedding", "params": {"num_embeddings": 32000, "embedding_dim": 512}, "activation": None, "position": 0},
+            {"layer_type": "PositionalEncoding", "params": {"d_model": 512, "max_len": 512}, "activation": None, "position": 1},
+            {"layer_type": "EncoderBlock", "params": {"d_model": 512, "n_heads": 8, "ffn_dim": 2048, "dropout": 0.1}, "activation": None, "position": 2},
+            {"layer_type": "EncoderBlock", "params": {"d_model": 512, "n_heads": 8, "ffn_dim": 2048, "dropout": 0.1}, "activation": None, "position": 3},
+            {"layer_type": "EncoderBlock", "params": {"d_model": 512, "n_heads": 8, "ffn_dim": 2048, "dropout": 0.1}, "activation": None, "position": 4},
+            {"layer_type": "DecoderBlockWithCrossAttn", "params": {"d_model": 512, "n_heads": 8, "ffn_dim": 2048, "dropout": 0.1}, "activation": None, "position": 5},
+            {"layer_type": "DecoderBlockWithCrossAttn", "params": {"d_model": 512, "n_heads": 8, "ffn_dim": 2048, "dropout": 0.1}, "activation": None, "position": 6},
+            {"layer_type": "DecoderBlockWithCrossAttn", "params": {"d_model": 512, "n_heads": 8, "ffn_dim": 2048, "dropout": 0.1}, "activation": None, "position": 7},
+            {"layer_type": "Linear", "params": {"in_features": 512, "out_features": 32000}, "activation": None, "position": 8},
+        ],
+    },
+    "mamba_lm": {
+        "name": "Mamba Language Model",
+        "description": "State-space model for language — linear-time alternative to transformers",
+        "dataset": "random",
+        "nodes": [
+            {"layer_type": "Embedding", "params": {"num_embeddings": 32000, "embedding_dim": 512}, "activation": None, "position": 0},
+            {"layer_type": "MambaBlock", "params": {"d_model": 512, "d_state": 16, "d_conv": 4, "expand_factor": 2}, "activation": None, "position": 1},
+            {"layer_type": "MambaBlock", "params": {"d_model": 512, "d_state": 16, "d_conv": 4, "expand_factor": 2}, "activation": None, "position": 2},
+            {"layer_type": "MambaBlock", "params": {"d_model": 512, "d_state": 16, "d_conv": 4, "expand_factor": 2}, "activation": None, "position": 3},
+            {"layer_type": "MambaBlock", "params": {"d_model": 512, "d_state": 16, "d_conv": 4, "expand_factor": 2}, "activation": None, "position": 4},
+            {"layer_type": "MambaBlock", "params": {"d_model": 512, "d_state": 16, "d_conv": 4, "expand_factor": 2}, "activation": None, "position": 5},
+            {"layer_type": "MambaBlock", "params": {"d_model": 512, "d_state": 16, "d_conv": 4, "expand_factor": 2}, "activation": None, "position": 6},
+            {"layer_type": "RMSNorm", "params": {"d_model": 512}, "activation": None, "position": 7},
+            {"layer_type": "Linear", "params": {"in_features": 512, "out_features": 32000}, "activation": None, "position": 8},
+        ],
+    },
+    # ========================= VIDEO GENERATION =========================
+    "video_dit": {
+        "name": "Video DiT (Veo-style)",
+        "description": "Video diffusion transformer — generate video frames with 3D attention (Veo/Sora-style)",
+        "dataset": "random",
+        "nodes": [
+            {"layer_type": "Conv3d", "params": {"in_channels": 3, "out_channels": 256, "kernel_size": 3}, "activation": "SiLU", "position": 0},
+            {"layer_type": "Conv3dBlock", "params": {"in_channels": 256, "out_channels": 256}, "activation": None, "position": 1},
+            {"layer_type": "TemporalPool", "params": {"d_model": 256, "mode": "mean"}, "activation": None, "position": 2},
+            {"layer_type": "PositionalEncoding", "params": {"d_model": 256, "max_len": 1024}, "activation": None, "position": 3},
+            {"layer_type": "TransformerBlock", "params": {"d_model": 256, "n_heads": 8, "dropout": 0.1}, "activation": None, "position": 4},
+            {"layer_type": "TransformerBlock", "params": {"d_model": 256, "n_heads": 8, "dropout": 0.1}, "activation": None, "position": 5},
+            {"layer_type": "TransformerBlock", "params": {"d_model": 256, "n_heads": 8, "dropout": 0.1}, "activation": None, "position": 6},
+            {"layer_type": "TransformerBlock", "params": {"d_model": 256, "n_heads": 8, "dropout": 0.1}, "activation": None, "position": 7},
+            {"layer_type": "Linear", "params": {"in_features": 256, "out_features": 768}, "activation": None, "position": 8},
+        ],
+    },
+    "multimodal_llm": {
+        "name": "Multi-Modal LLM",
+        "description": "Vision + Audio + Text multi-modal transformer (Gemini/GPT-4V/Pixtral architecture)",
+        "dataset": "random",
+        "nodes": [
+            {"layer_type": "PatchEmbedding", "params": {"in_channels": 3, "d_model": 512, "patch_size": 16, "image_size": 224}, "activation": None, "position": 0},
+            {"layer_type": "AudioEmbedding", "params": {"n_mels": 80, "d_model": 512}, "activation": None, "position": 1},
+            {"layer_type": "Embedding", "params": {"num_embeddings": 32000, "embedding_dim": 512}, "activation": None, "position": 2},
+            {"layer_type": "RotaryPositionalEmbedding", "params": {"d_model": 512}, "activation": None, "position": 3},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 512, "n_heads": 8, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 4},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 512, "n_heads": 8, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 5},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 512, "n_heads": 8, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 6},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 512, "n_heads": 8, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 7},
+            {"layer_type": "RMSNorm", "params": {"d_model": 512}, "activation": None, "position": 8},
+            {"layer_type": "Linear", "params": {"in_features": 512, "out_features": 32000}, "activation": None, "position": 9},
+        ],
+    },
+    "nano_lm": {
+        "name": "Nano Language Model",
+        "description": "Tiny but complete LLM for learning and experimentation — nanoGPT/TinyLlama style",
+        "dataset": "random",
+        "nodes": [
+            {"layer_type": "Embedding", "params": {"num_embeddings": 8000, "embedding_dim": 256}, "activation": None, "position": 0},
+            {"layer_type": "RotaryPositionalEmbedding", "params": {"d_model": 256}, "activation": None, "position": 1},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 256, "n_heads": 4, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 2},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 256, "n_heads": 4, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 3},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 256, "n_heads": 4, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 4},
+            {"layer_type": "LLMDecoderBlock", "params": {"d_model": 256, "n_heads": 4, "ffn_type": "swiglu", "norm_type": "rmsnorm"}, "activation": None, "position": 5},
+            {"layer_type": "RMSNorm", "params": {"d_model": 256}, "activation": None, "position": 6},
+            {"layer_type": "Linear", "params": {"in_features": 256, "out_features": 8000}, "activation": None, "position": 7},
         ],
     },
 }
