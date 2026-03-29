@@ -449,25 +449,6 @@ async def list_experiments():
     ]}
 
 
-@app.get("/api/experiments/{exp_id}")
-async def get_experiment(exp_id: int):
-    if exp_id < 0 or exp_id >= len(experiment_history):
-        return {"status": "error", "message": "Experiment not found"}
-    return experiment_history[exp_id]
-
-
-@app.delete("/api/experiments/{exp_id}")
-async def delete_experiment(exp_id: int):
-    if exp_id < 0 or exp_id >= len(experiment_history):
-        return {"status": "error", "message": "Experiment not found"}
-    experiment_history.pop(exp_id)
-    # Reindex
-    for i, e in enumerate(experiment_history):
-        e["id"] = i
-    _save_experiments()
-    return {"status": "deleted"}
-
-
 @app.get("/api/experiments/compare")
 async def compare_experiments():
     """Get all experiments formatted for comparison charts."""
@@ -485,6 +466,25 @@ async def compare_experiments():
             for e in experiment_history
         ]
     }
+
+
+@app.get("/api/experiments/{exp_id}")
+async def get_experiment(exp_id: int):
+    if exp_id < 0 or exp_id >= len(experiment_history):
+        return {"status": "error", "message": "Experiment not found"}
+    return experiment_history[exp_id]
+
+
+@app.delete("/api/experiments/{exp_id}")
+async def delete_experiment(exp_id: int):
+    if exp_id < 0 or exp_id >= len(experiment_history):
+        return {"status": "error", "message": "Experiment not found"}
+    experiment_history.pop(exp_id)
+    # Reindex
+    for i, e in enumerate(experiment_history):
+        e["id"] = i
+    _save_experiments()
+    return {"status": "deleted"}
 
 
 # --- LLM Reasoning Benchmark ---
@@ -2270,7 +2270,7 @@ async def llm_blueprints():
             "category": v.get("category", "other"),
             "description": v["description"],
             "model_class": v["model_class"],
-            "config": v["config"],
+            "config": v.get("config", {}),
             "scalable_configs": v.get("scalable_configs", {}),
             "training_tips": v.get("training_tips", ""),
             "default_block": v.get("default_block"),
@@ -2300,7 +2300,7 @@ async def build_from_blueprint(body: dict[str, Any]):
         return {"status": "error", "message": f"Unknown blueprint: {blueprint_key}. Available: {list(MODEL_BLUEPRINTS.keys())}"}
 
     bp = MODEL_BLUEPRINTS[blueprint_key]
-    config = dict(bp["config"])
+    config = dict(bp.get("config", {}))
 
     # Apply scale preset if specified
     scale = body.get("scale")
@@ -2321,9 +2321,9 @@ async def build_from_blueprint(body: dict[str, Any]):
 
         for comp_name, comp_info in arch.items():
             components[comp_name] = {
-                "class": comp_info["class"],
-                "description": comp_info["description"],
-                "config": comp_info["config"],
+                "class": comp_info.get("class", ""),
+                "description": comp_info.get("description", ""),
+                "config": comp_info.get("config", {}),
             }
 
         # Store blueprint info in engine
@@ -3505,13 +3505,16 @@ async def hf_search_datasets(query: str, task: str | None = None, limit: int = 2
 @app.post("/api/hf/load")
 async def hf_load_model(body: dict[str, Any]):
     mgr = _get_hf_manager()
-    result = mgr.load_model(
-        model_id=body["model_id"],
-        library=body.get("library"),
-        task=body.get("task"),
-        num_labels=body.get("num_labels"),
-        dtype=body.get("dtype"),
-    )
+    try:
+        result = mgr.load_model(
+            model_id=body["model_id"],
+            library=body.get("library"),
+            task=body.get("task"),
+            num_labels=body.get("num_labels"),
+            dtype=body.get("dtype"),
+        )
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to load model: {e}"}
     engine.model_source = "hf"
     await broadcast("hf_model_loaded", result)
     return result

@@ -51,7 +51,7 @@ state-graph                     # Opens UI at http://localhost:8765
 - `state_graph/workspace/executor.py` — Python code execution with stdout/stderr capture
 
 ### Server & UI
-- `state_graph/server/app.py` — FastAPI + WebSocket, 291 endpoints (blueprints, novel architecture lab, diffusion training)
+- `state_graph/server/app.py` — FastAPI + WebSocket, 285+ endpoints (blueprints, novel architecture lab, diffusion training, RL, robotics, physics, data eng, workspace, eval, deploy)
 - `state_graph/ui/index.html` — Single-page app: CodeMirror IDE, Three.js 3D, Chart.js, annotation tools
 
 ## Key Patterns
@@ -65,5 +65,5 @@ state-graph                     # Opens UI at http://localhost:8765
 ## Tests
 
 ```bash
-pytest tests/ -v  # 598 tests covering core, server, datasets, LLM, blueprints
+pytest tests/ -v  # 994 tests covering core, server, datasets, LLM, blueprints, RL, robotics, data eng, workspace, eval, deploy
 ```

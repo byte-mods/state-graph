@@ -173,12 +173,14 @@ class MetricsCollector:
             for pname, param in module.named_parameters(recurse=False):
                 if param.data is not None:
                     metrics.weight_mean = param.data.mean().item()
-                    metrics.weight_std = param.data.std().item()
+                    std_val = param.data.std().item() if param.data.numel() > 1 else 0.0
+                    metrics.weight_std = std_val if std_val == std_val else 0.0  # NaN guard
                     metrics.weight_norm = param.data.norm().item()
                     metrics.memory_mb = param.nelement() * param.element_size() / (1024 * 1024)
                 if param.grad is not None:
                     metrics.grad_mean = param.grad.mean().item()
-                    metrics.grad_std = param.grad.std().item()
+                    grad_std_val = param.grad.std().item() if param.grad.numel() > 1 else 0.0
+                    metrics.grad_std = grad_std_val if grad_std_val == grad_std_val else 0.0  # NaN guard
                     metrics.grad_norm = param.grad.norm().item()
 
             # Grad-to-weight ratio
