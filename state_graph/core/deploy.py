@@ -134,6 +134,43 @@ CMD ["python", "server.py"]
 
 def generate_gradio_app(model_path: str, model_type: str = "pytorch", task: str = "classification") -> str:
     """Generate a Gradio demo app."""
+    if task == "classification":
+        predict_fn = '''def predict(input_text):
+    tokens = [ord(c) % 256 for c in input_text[:512]]
+    inp = torch.tensor([tokens], dtype=torch.float32)
+    with torch.no_grad():
+        out = model(inp)
+    if hasattr(out, "logits"):
+        out = out.logits
+    probs = torch.softmax(out[0], dim=-1)
+    top_k = min(5, probs.shape[-1])
+    values, indices = torch.topk(probs, top_k)
+    return {f"class_{i.item()}": round(p.item(), 4) for p, i in zip(values, indices)}'''
+        output_component = 'gr.Label(label="Prediction")'
+    elif task == "regression":
+        predict_fn = '''def predict(input_text):
+    tokens = [ord(c) % 256 for c in input_text[:512]]
+    inp = torch.tensor([tokens], dtype=torch.float32)
+    with torch.no_grad():
+        out = model(inp)
+    if hasattr(out, "logits"):
+        out = out.logits
+    values = out[0].tolist()
+    if isinstance(values, list) and len(values) == 1:
+        return str(round(values[0], 6))
+    return str([round(v, 6) for v in values])'''
+        output_component = 'gr.Textbox(label="Output")'
+    else:
+        predict_fn = '''def predict(input_text):
+    tokens = [ord(c) % 256 for c in input_text[:512]]
+    inp = torch.tensor([tokens], dtype=torch.float32)
+    with torch.no_grad():
+        out = model(inp)
+    if hasattr(out, "logits"):
+        out = out.logits
+    return str(out[0].tolist())'''
+        output_component = 'gr.Textbox(label="Output")'
+
     return f'''"""Auto-generated Gradio demo."""
 import gradio as gr
 import torch
@@ -142,15 +179,12 @@ import numpy as np
 model = torch.jit.load("{model_path}")
 model.eval()
 
-def predict(input_text):
-    # Adapt this to your model's input format
-    # For classification: tokenize input_text, run model, return label
-    return "Prediction placeholder — adapt predict() to your model"
+{predict_fn}
 
 demo = gr.Interface(
     fn=predict,
     inputs=gr.Textbox(label="Input"),
-    outputs=gr.Label(label="Prediction"),
+    outputs={output_component},
     title="Model Demo",
     description="Auto-generated from StateGraph",
 )

@@ -615,36 +615,15 @@ async def benchmark_reasoning(body: dict[str, Any]):
         has_tokenizer = True
 
     if not has_generate or not has_tokenizer:
-        # For non-LLM models, do a simulated benchmark based on model confidence
-        for q in questions:
-            cat = q["category"]
-            if cat not in results_by_cat:
-                results_by_cat[cat] = {"correct": 0, "total": 0, "score": 0.0}
-
-            start = t.time()
-            try:
-                dummy = torch.randn(1, *([model.config.hidden_size] if hasattr(model, 'config') and hasattr(model.config, 'hidden_size') else [64])).to(engine.device)
-                with torch.no_grad():
-                    out = model(dummy) if not isinstance(dummy, dict) else model(**dummy)
-                latency = (t.time() - start) * 1000
-                total_latency += latency
-            except Exception:
-                latency = 0
-            results_by_cat[cat]["total"] += 1
-            total_count += 1
-
-        # Non-LLM models can't really do reasoning
-        for cat in results_by_cat:
-            results_by_cat[cat]["score"] = 0.0
-
         return {
-            "status": "completed",
+            "status": "skipped",
             "results": {
-                "overall_score": 0.0,
-                "categories": results_by_cat,
-                "avg_latency_ms": total_latency / max(total_count, 1),
-                "total_time_sec": total_latency / 1000,
-                "note": "Model does not support text generation. Load an LLM for reasoning benchmarks.",
+                "overall_score": None,
+                "categories": {},
+                "avg_latency_ms": None,
+                "total_time_sec": 0,
+                "note": "Reasoning benchmarks require a language model with a tokenizer and generate() method. "
+                        "Load an LLM (e.g., via /api/hf/load) to run reasoning benchmarks.",
             }
         }
 
@@ -2635,7 +2614,45 @@ async def train_diffusion(body: dict[str, Any]):
         n_samples = body.get("n_samples", max(batch_size * 10, 64))
         data = torch.randn(n_samples, 3, image_size, image_size)
     else:
-        return {"status": "error", "message": "Folder data loading not yet implemented. Use data_source='random' for demo."}
+        # Load images from folder
+        from pathlib import Path as _Path
+        from PIL import Image as _PILImage
+        from torchvision import transforms as _T
+
+        folder = _Path(data_source)
+        if not folder.is_dir():
+            return {"status": "error", "message": f"Data source folder not found: {data_source}"}
+
+        transform = _T.Compose([
+            _T.Resize((image_size, image_size)),
+            _T.ToTensor(),
+            _T.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+        ])
+
+        images = []
+        _IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff"}
+        for img_path in sorted(folder.iterdir()):
+            if img_path.suffix.lower() in _IMG_EXTS:
+                try:
+                    img = _PILImage.open(img_path).convert("RGB")
+                    images.append(transform(img))
+                except Exception:
+                    continue
+        # Also recurse one level into subdirs (e.g. ImageFolder structure)
+        for subdir in sorted(folder.iterdir()):
+            if subdir.is_dir():
+                for img_path in sorted(subdir.iterdir()):
+                    if img_path.suffix.lower() in _IMG_EXTS:
+                        try:
+                            img = _PILImage.open(img_path).convert("RGB")
+                            images.append(transform(img))
+                        except Exception:
+                            continue
+
+        if not images:
+            return {"status": "error", "message": f"No valid images found in {data_source}"}
+
+        data = torch.stack(images)
 
     from torch.utils.data import DataLoader, TensorDataset
     loader = DataLoader(TensorDataset(data), batch_size=batch_size, shuffle=True)

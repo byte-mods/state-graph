@@ -1023,7 +1023,8 @@ class ComposableBlock(nn.Module):
                 ))
 
             elif stype == "residual":
-                # Placeholder — residual add uses stored activations
+                # No-op module: residual addition is handled in forward() using stored activations.
+                # nn.Identity() keeps modules_list aligned with step_types for correct indexing.
                 self.modules_list.append(nn.Identity())
 
             elif stype == "dropout":

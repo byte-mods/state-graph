@@ -246,8 +246,8 @@ class NASEngine:
                     cls = Registry.get_layer(t)
                     params = {k: v for k, v in spec.items() if k != "type"}
                     layers.append(cls(**params))
-                except Exception:
-                    pass
+                except Exception as e:
+                    raise ValueError(f"NAS architecture build failed: unknown layer type {t!r}: {e}") from e
 
         return nn.Sequential(*layers)
 

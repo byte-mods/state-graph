@@ -50,7 +50,14 @@ class PhysicsServer:
             try:
                 return self._load_mujoco(bodies, joints or [])
             except ImportError:
-                pass
+                import logging
+                logging.getLogger("state_graph").warning(
+                    "MuJoCo not installed. Falling back to simplified Euler integration physics. "
+                    "Install mujoco (`pip install mujoco`) for accurate simulation."
+                )
+                self._emit("physics_warning", {
+                    "message": "MuJoCo not available — using Euler fallback. Install: pip install mujoco",
+                })
 
         # Fallback: simple Euler integration physics
         self._use_mujoco = False
@@ -63,6 +70,7 @@ class PhysicsServer:
         return {
             "status": "loaded",
             "engine": "euler_fallback",
+            "warning": "MuJoCo not installed. Using simplified Euler integration — results may be less accurate. Install: pip install mujoco",
             "bodies": len(self._bodies),
             "joints": len(self._joints),
             "timestep": self._timestep,

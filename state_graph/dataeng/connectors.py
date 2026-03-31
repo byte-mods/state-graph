@@ -477,7 +477,21 @@ class DataConnector:
     # ── Kafka ──
 
     def _connect_kafka(self):
-        pass  # Kafka uses producer/consumer per operation
+        # Kafka creates producer/consumer per operation, but validate broker reachability
+        from kafka import KafkaConsumer
+        from kafka.errors import NoBrokersAvailable
+        p = self.params
+        try:
+            consumer = KafkaConsumer(
+                bootstrap_servers=p["bootstrap_servers"],
+                request_timeout_ms=5000,
+            )
+            consumer.close()
+        except NoBrokersAvailable:
+            raise ConnectionError(
+                f"Cannot reach Kafka brokers at {p['bootstrap_servers']}. "
+                "Verify the broker address and that Kafka is running."
+            )
 
     def _load_kafka(self, query, limit):
         from kafka import KafkaConsumer

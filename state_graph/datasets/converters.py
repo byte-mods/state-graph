@@ -70,14 +70,23 @@ def yolo_to_coco(
         if img_file.suffix.lower() not in {".jpg", ".jpeg", ".png", ".bmp"}:
             continue
 
-        # Try to get image dimensions
+        # Get image dimensions — skip image if unreadable
         w, h = 0, 0
         try:
             from PIL import Image
             with Image.open(img_file) as im:
                 w, h = im.size
-        except Exception:
-            pass
+        except ImportError:
+            import logging
+            logging.getLogger("state_graph").warning(
+                "PIL not installed. Cannot read image dimensions for %s. Install: pip install Pillow", img_file.name
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger("state_graph").warning(
+                "Could not read image %s: %s — skipping", img_file.name, e
+            )
+            continue  # skip this image: a 0x0 entry would produce invalid COCO annotations
 
         coco["images"].append({
             "id": img_id,

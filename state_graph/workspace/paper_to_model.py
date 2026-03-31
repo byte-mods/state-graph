@@ -114,8 +114,11 @@ def _fetch_arxiv(paper_id: str) -> dict:
         if len(text) > 15000:
             text = text[:15000]
         full_text = text
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger("state_graph").debug(
+            "Could not fetch full paper HTML from ar5iv for %s: %s", paper_id, e
+        )
 
     return {
         "status": "ok",
@@ -237,8 +240,8 @@ Return the JSON now:"""
         if json_match:
             config = json.loads(json_match.group())
             return {"status": "ok", "config": config, "raw_response": response}
-    except json.JSONDecodeError:
-        pass
+    except json.JSONDecodeError as e:
+        return {"status": "error", "message": f"AI returned invalid JSON: {e}", "raw_response": response}
 
     return {"status": "error", "message": "AI did not return valid JSON", "raw_response": response}
 
@@ -253,17 +256,19 @@ def apply_paper_config(engine, config: dict) -> dict:
 
     # Register custom formulas
     registered_formulas = []
+    failed_formulas = []
     for formula in config.get("custom_formulas", []):
         try:
             Registry.register_formula_from_string(formula["name"], formula["expression"])
             registered_formulas.append(formula["name"])
-        except Exception:
-            pass
+        except Exception as e:
+            failed_formulas.append({"name": formula.get("name", "?"), "error": str(e)})
 
     # Add layers
     arch = config.get("architecture", {})
     nodes = arch.get("nodes", [])
     added_layers = []
+    failed_layers = []
     for node in nodes:
         try:
             nid = engine.graph.add_layer(
@@ -274,14 +279,14 @@ def apply_paper_config(engine, config: dict) -> dict:
             )
             added_layers.append(nid)
         except Exception as e:
-            pass
+            failed_layers.append({"layer_type": node.get("layer_type", "?"), "error": str(e)})
 
     # Apply training config
     tc = config.get("training_config", {})
     if tc:
         engine.config.update({k: v for k, v in tc.items() if v is not None})
 
-    return {
+    result = {
         "status": "applied",
         "paper_title": config.get("paper_title", ""),
         "paper_summary": config.get("paper_summary", ""),
@@ -293,3 +298,9 @@ def apply_paper_config(engine, config: dict) -> dict:
         "training_config": tc,
         "graph": engine.graph.to_dict(),
     }
+    if failed_formulas:
+        result["failed_formulas"] = failed_formulas
+    if failed_layers:
+        result["failed_layers"] = failed_layers
+        result["warnings"] = f"{len(failed_layers)} layer(s) could not be added"
+    return result
